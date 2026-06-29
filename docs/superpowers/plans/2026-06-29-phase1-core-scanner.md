@@ -2764,5 +2764,881 @@ git commit -m "feat(notifiers): SmtpNotifier send/verify via nodemailer + SmtpEr
 
 ---
 
+### Task 16: `github-source` - Octokit client with throttling
+
+**Files:**
+- Create: `packages/github-source/package.json`
+- Create: `packages/github-source/tsconfig.json`
+- Create: `packages/github-source/src/index.ts`
+- Create: `packages/github-source/src/client.ts`
+- Test: `packages/github-source/src/client.test.ts`
+
+**Interfaces:**
+- Consumes: nothing (depends on `@octokit/rest` and `@octokit/plugin-throttling`).
+- Produces:
+  - `createOctokit(opts: { token: string; userAgent?: string }): Octokit` - returns an Octokit with the throttling plugin enabled (max 3 retries on primary/secondary rate limits, exponential backoff handled by plugin), 30s request timeout.
+
+- [ ] **Step 1: Create package skeleton**
+
+Create `packages/github-source/package.json`:
+
+```json
+{
+  "name": "@work-summary/github-source",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" } },
+  "engines": { "node": ">=20.0.0" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "lint": "eslint src",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@work-summary/core": "workspace:*",
+    "@octokit/rest": "^21.0.2",
+    "@octokit/plugin-throttling": "^9.3.2",
+    "p-limit": "^6.1.0"
+  },
+  "devDependencies": {
+    "msw": "^2.4.9",
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.5"
+  }
+}
+```
+
+Create `packages/github-source/tsconfig.json`:
+
+```json
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "rootDir": "src", "outDir": "dist" },
+  "include": ["src/**/*"]
+}
+```
+
+- [ ] **Step 2: Write failing test**
+
+Create `packages/github-source/src/client.test.ts`:
+
+```ts
+import { describe, it, expect } from 'vitest';
+import { createOctokit } from './client.js';
+
+describe('createOctokit', () => {
+  it('returns an object with .request and .rest', () => {
+    const o = createOctokit({ token: 'fake' });
+    expect(typeof o.request).toBe('function');
+    expect(typeof o.rest.repos.get).toBe('function');
+  });
+
+  it('sets the user agent', () => {
+    const o = createOctokit({ token: 'fake', userAgent: 'work-summary-test/0.1' });
+    expect((o as unknown as { request: { endpoint: { DEFAULTS: { headers: Record<string, string> } } } }).request.endpoint.DEFAULTS.headers['user-agent']).toContain('work-summary-test/0.1');
+  });
+});
+```
+
+- [ ] **Step 3: Run test, verify failure**
+
+Run: `pnpm --filter @work-summary/github-source test`
+
+Expected: FAIL.
+
+- [ ] **Step 4: Implement client**
+
+Create `packages/github-source/src/client.ts`:
+
+```ts
+import { Octokit } from '@octokit/rest';
+import { throttling } from '@octokit/plugin-throttling';
+
+const ThrottledOctokit = Octokit.plugin(throttling);
+
+export interface OctokitOptions {
+  token: string;
+  userAgent?: string;
+}
+
+export type GithubClient = InstanceType<typeof ThrottledOctokit>;
+
+export function createOctokit(opts: OctokitOptions): GithubClient {
+  return new ThrottledOctokit({
+    auth: opts.token,
+    userAgent: opts.userAgent ?? 'work-summary/0.1.0',
+    request: { timeout: 30000 },
+    throttle: {
+      onRateLimit: (retryAfter, options, _octokit, retryCount) => {
+        if (retryCount < 3) return true;
+        return false;
+      },
+      onSecondaryRateLimit: (retryAfter, options, _octokit, retryCount) => {
+        if (retryCount < 3) return true;
+        return false;
+      },
+    },
+  });
+}
+```
+
+Create `packages/github-source/src/index.ts`:
+
+```ts
+export { createOctokit } from './client.js';
+export type { GithubClient, OctokitOptions } from './client.js';
+```
+
+- [ ] **Step 5: Run test, verify pass**
+
+Run: `pnpm --filter @work-summary/github-source test`
+
+Expected: PASS, 2 tests.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add packages/github-source
+git commit -m "feat(github-source): createOctokit with throttling plugin"
+```
+
+---
+
+### Task 17: `github-source` - fetch open PRs + reviews
+
+**Files:**
+- Create: `packages/github-source/src/fetch-prs.ts`
+- Create: `packages/github-source/test/fixtures/prs.ts`
+- Create: `packages/github-source/test/msw-server.ts`
+- Test: `packages/github-source/src/fetch-prs.test.ts`
+- Modify: `packages/github-source/src/index.ts`
+
+**Interfaces:**
+- Consumes: `GithubClient` from Task 16.
+- Produces:
+  - `fetchOpenPullRequests(client, repo): Promise<RawPullRequest[]>`
+  - `fetchPullRequestReviews(client, repo, number): Promise<RawReview[]>`
+  - `interface RawPullRequest { number; title; htmlUrl; authorLogin; assigneeLogins[]; lastCommitAt: string | null; }`
+
+- [ ] **Step 1: Write fixture and msw server**
+
+Create `packages/github-source/test/fixtures/prs.ts`:
+
+```ts
+export const prListFixture = [
+  {
+    number: 7,
+    title: 'feat: add x',
+    html_url: 'https://github.com/org/r/pull/7',
+    user: { login: 'me', type: 'User' },
+    assignees: [{ login: 'jane' }],
+    head: { sha: 'abc' },
+  },
+];
+
+export const prHeadCommitFixture = {
+  sha: 'abc',
+  commit: { author: { date: '2026-06-01T09:00:00Z' } },
+};
+
+export const reviewsFixture = [
+  { id: 1, state: 'CHANGES_REQUESTED', user: { login: 'alice', type: 'User' }, submitted_at: '2026-06-01T10:00:00Z' },
+  { id: 2, state: 'COMMENTED', user: { login: 'bob', type: 'User' }, submitted_at: '2026-06-01T11:00:00Z' },
+];
+```
+
+Create `packages/github-source/test/msw-server.ts`:
+
+```ts
+import { setupServer } from 'msw/node';
+import { http, HttpResponse } from 'msw';
+import { prListFixture, prHeadCommitFixture, reviewsFixture } from './fixtures/prs.js';
+
+export function buildServer() {
+  return setupServer(
+    http.get('https://api.github.com/repos/:owner/:repo/pulls', () => HttpResponse.json(prListFixture)),
+    http.get('https://api.github.com/repos/:owner/:repo/commits/:sha', () => HttpResponse.json(prHeadCommitFixture)),
+    http.get('https://api.github.com/repos/:owner/:repo/pulls/:number/reviews', () => HttpResponse.json(reviewsFixture)),
+  );
+}
+```
+
+- [ ] **Step 2: Write failing test**
+
+Create `packages/github-source/src/fetch-prs.test.ts`:
+
+```ts
+import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
+import { createOctokit } from './client.js';
+import { fetchOpenPullRequests, fetchPullRequestReviews } from './fetch-prs.js';
+import { buildServer } from '../test/msw-server.js';
+
+const server = buildServer();
+beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
+
+describe('fetchOpenPullRequests', () => {
+  it('returns normalized PR list with head commit timestamp', async () => {
+    const client = createOctokit({ token: 'fake' });
+    const prs = await fetchOpenPullRequests(client, 'org/r');
+    expect(prs).toHaveLength(1);
+    expect(prs[0]).toMatchObject({
+      number: 7,
+      title: 'feat: add x',
+      htmlUrl: 'https://github.com/org/r/pull/7',
+      authorLogin: 'me',
+      assigneeLogins: ['jane'],
+      lastCommitAt: '2026-06-01T09:00:00Z',
+    });
+  });
+});
+
+describe('fetchPullRequestReviews', () => {
+  it('returns reviews with normalized author and state', async () => {
+    const client = createOctokit({ token: 'fake' });
+    const reviews = await fetchPullRequestReviews(client, 'org/r', 7);
+    expect(reviews).toHaveLength(2);
+    expect(reviews[0]).toMatchObject({
+      state: 'CHANGES_REQUESTED',
+      author: { login: 'alice', isBot: false },
+      submittedAt: '2026-06-01T10:00:00Z',
+    });
+  });
+});
+```
+
+- [ ] **Step 3: Run test, verify failure**
+
+Run: `pnpm --filter @work-summary/github-source test fetch-prs`
+
+Expected: FAIL.
+
+- [ ] **Step 4: Implement**
+
+Create `packages/github-source/src/fetch-prs.ts`:
+
+```ts
+import type { RawReview } from '@work-summary/core';
+import type { GithubClient } from './client.js';
+
+export interface RawPullRequest {
+  number: number;
+  title: string;
+  htmlUrl: string;
+  authorLogin: string;
+  assigneeLogins: string[];
+  lastCommitAt: string | null;
+}
+
+function splitRepo(repo: string): { owner: string; repo: string } {
+  const [owner, name] = repo.split('/');
+  if (!owner || !name) throw new Error(`Invalid repo "${repo}", expected "owner/name"`);
+  return { owner, repo: name };
+}
+
+function isBot(login: string, type: string | undefined): boolean {
+  return type === 'Bot' || login.endsWith('[bot]');
+}
+
+export async function fetchOpenPullRequests(client: GithubClient, repo: string): Promise<RawPullRequest[]> {
+  const { owner, repo: name } = splitRepo(repo);
+  const prs = await client.paginate(client.rest.pulls.list, {
+    owner, repo: name, state: 'open', per_page: 100,
+  });
+  const result: RawPullRequest[] = [];
+  for (const p of prs) {
+    let lastCommitAt: string | null = null;
+    if (p.head?.sha) {
+      try {
+        const commit = await client.rest.repos.getCommit({ owner, repo: name, ref: p.head.sha });
+        lastCommitAt = commit.data.commit.author?.date ?? null;
+      } catch {
+        lastCommitAt = null;
+      }
+    }
+    result.push({
+      number: p.number,
+      title: p.title,
+      htmlUrl: p.html_url,
+      authorLogin: p.user?.login ?? 'ghost',
+      assigneeLogins: (p.assignees ?? []).map((a) => a.login),
+      lastCommitAt,
+    });
+  }
+  return result;
+}
+
+export async function fetchPullRequestReviews(client: GithubClient, repo: string, number: number): Promise<RawReview[]> {
+  const { owner, repo: name } = splitRepo(repo);
+  const reviews = await client.paginate(client.rest.pulls.listReviews, { owner, repo: name, pull_number: number, per_page: 100 });
+  return reviews.map((r) => ({
+    state: (r.state as RawReview['state']) ?? 'COMMENTED',
+    author: { login: r.user?.login ?? 'ghost', isBot: isBot(r.user?.login ?? '', r.user?.type) },
+    submittedAt: r.submitted_at ?? '',
+  }));
+}
+```
+
+Append to `packages/github-source/src/index.ts`:
+
+```ts
+export { fetchOpenPullRequests, fetchPullRequestReviews } from './fetch-prs.js';
+export type { RawPullRequest } from './fetch-prs.js';
+```
+
+- [ ] **Step 5: Run test, verify pass**
+
+Run: `pnpm --filter @work-summary/github-source test fetch-prs`
+
+Expected: PASS.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add packages/github-source
+git commit -m "feat(github-source): fetch open PRs (with head commit ts) and reviews"
+```
+
+---
+
+### Task 18: `github-source` - fetch comments (issue + PR review comments)
+
+**Files:**
+- Create: `packages/github-source/src/fetch-comments.ts`
+- Modify: `packages/github-source/test/msw-server.ts`
+- Modify: `packages/github-source/test/fixtures/prs.ts` (add comments fixtures)
+- Test: `packages/github-source/src/fetch-comments.test.ts`
+- Modify: `packages/github-source/src/index.ts`
+
+**Interfaces:**
+- Consumes: `GithubClient`.
+- Produces:
+  - `fetchIssueComments(client, repo, number, since?): Promise<RawComment[]>` - covers both PR conversation comments and issue comments (same endpoint).
+  - `fetchPrReviewComments(client, repo, number, since?): Promise<RawComment[]>` - inline review comments on a PR.
+
+- [ ] **Step 1: Extend fixtures and msw**
+
+Append to `packages/github-source/test/fixtures/prs.ts`:
+
+```ts
+export const issueCommentsFixture = [
+  { id: 100, body: 'please review', html_url: 'https://gh/c/100', user: { login: 'alice', type: 'User' }, created_at: '2026-06-01T10:30:00Z' },
+];
+
+export const prReviewCommentsFixture = [
+  { id: 200, body: 'nit: rename', html_url: 'https://gh/c/200', user: { login: 'bob', type: 'User' }, created_at: '2026-06-01T11:30:00Z' },
+];
+```
+
+Replace `packages/github-source/test/msw-server.ts` with:
+
+```ts
+import { setupServer } from 'msw/node';
+import { http, HttpResponse } from 'msw';
+import {
+  prListFixture,
+  prHeadCommitFixture,
+  reviewsFixture,
+  issueCommentsFixture,
+  prReviewCommentsFixture,
+} from './fixtures/prs.js';
+
+export function buildServer() {
+  return setupServer(
+    http.get('https://api.github.com/repos/:owner/:repo/pulls', () => HttpResponse.json(prListFixture)),
+    http.get('https://api.github.com/repos/:owner/:repo/commits/:sha', () => HttpResponse.json(prHeadCommitFixture)),
+    http.get('https://api.github.com/repos/:owner/:repo/pulls/:number/reviews', () => HttpResponse.json(reviewsFixture)),
+    http.get('https://api.github.com/repos/:owner/:repo/issues/:number/comments', () => HttpResponse.json(issueCommentsFixture)),
+    http.get('https://api.github.com/repos/:owner/:repo/pulls/:number/comments', () => HttpResponse.json(prReviewCommentsFixture)),
+  );
+}
+```
+
+- [ ] **Step 2: Write failing test**
+
+Create `packages/github-source/src/fetch-comments.test.ts`:
+
+```ts
+import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
+import { createOctokit } from './client.js';
+import { fetchIssueComments, fetchPrReviewComments } from './fetch-comments.js';
+import { buildServer } from '../test/msw-server.js';
+
+const server = buildServer();
+beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
+
+describe('fetchIssueComments', () => {
+  it('normalizes issue/conversation comments', async () => {
+    const client = createOctokit({ token: 'fake' });
+    const comments = await fetchIssueComments(client, 'org/r', 7);
+    expect(comments).toHaveLength(1);
+    expect(comments[0]).toMatchObject({
+      nativeId: '100',
+      url: 'https://gh/c/100',
+      author: { login: 'alice', isBot: false },
+      body: 'please review',
+      createdAt: '2026-06-01T10:30:00Z',
+    });
+  });
+});
+
+describe('fetchPrReviewComments', () => {
+  it('normalizes inline PR review comments', async () => {
+    const client = createOctokit({ token: 'fake' });
+    const comments = await fetchPrReviewComments(client, 'org/r', 7);
+    expect(comments).toHaveLength(1);
+    expect(comments[0]).toMatchObject({
+      nativeId: '200',
+      author: { login: 'bob' },
+      body: 'nit: rename',
+    });
+  });
+});
+```
+
+- [ ] **Step 3: Run test, verify failure**
+
+Run: `pnpm --filter @work-summary/github-source test fetch-comments`
+
+Expected: FAIL.
+
+- [ ] **Step 4: Implement**
+
+Create `packages/github-source/src/fetch-comments.ts`:
+
+```ts
+import type { RawComment } from '@work-summary/core';
+import type { GithubClient } from './client.js';
+
+function splitRepo(repo: string): { owner: string; repo: string } {
+  const [owner, name] = repo.split('/');
+  if (!owner || !name) throw new Error(`Invalid repo "${repo}"`);
+  return { owner, repo: name };
+}
+
+function isBot(login: string, type: string | undefined): boolean {
+  return type === 'Bot' || login.endsWith('[bot]');
+}
+
+export async function fetchIssueComments(
+  client: GithubClient,
+  repo: string,
+  number: number,
+  since?: string,
+): Promise<RawComment[]> {
+  const { owner, repo: name } = splitRepo(repo);
+  const params: { owner: string; repo: string; issue_number: number; per_page: number; since?: string } = {
+    owner, repo: name, issue_number: number, per_page: 100,
+  };
+  if (since) params.since = since;
+  const items = await client.paginate(client.rest.issues.listComments, params);
+  return items.map((c) => ({
+    nativeId: String(c.id),
+    url: c.html_url,
+    author: { login: c.user?.login ?? 'ghost', isBot: isBot(c.user?.login ?? '', c.user?.type) },
+    body: c.body ?? '',
+    createdAt: c.created_at,
+  }));
+}
+
+export async function fetchPrReviewComments(
+  client: GithubClient,
+  repo: string,
+  number: number,
+  since?: string,
+): Promise<RawComment[]> {
+  const { owner, repo: name } = splitRepo(repo);
+  const params: { owner: string; repo: string; pull_number: number; per_page: number; since?: string } = {
+    owner, repo: name, pull_number: number, per_page: 100,
+  };
+  if (since) params.since = since;
+  const items = await client.paginate(client.rest.pulls.listReviewComments, params);
+  return items.map((c) => ({
+    nativeId: String(c.id),
+    url: c.html_url,
+    author: { login: c.user?.login ?? 'ghost', isBot: isBot(c.user?.login ?? '', c.user?.type) },
+    body: c.body ?? '',
+    createdAt: c.created_at,
+  }));
+}
+```
+
+Append export to `packages/github-source/src/index.ts`:
+
+```ts
+export { fetchIssueComments, fetchPrReviewComments } from './fetch-comments.js';
+```
+
+- [ ] **Step 5: Run test, verify pass**
+
+Run: `pnpm --filter @work-summary/github-source test fetch-comments`
+
+Expected: PASS.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add packages/github-source
+git commit -m "feat(github-source): fetch issue and PR review comments"
+```
+
+---
+
+### Task 19: `github-source` - fetch mentions via search
+
+**Files:**
+- Create: `packages/github-source/src/fetch-mentions.ts`
+- Modify: `packages/github-source/test/msw-server.ts`
+- Test: `packages/github-source/src/fetch-mentions.test.ts`
+- Modify: `packages/github-source/src/index.ts`
+
+**Interfaces:**
+- Consumes: `GithubClient`.
+- Produces:
+  - `fetchMentionedContainers(client, opts: { login; repos: string[]; since?: string }): Promise<Array<{ repo: string; number: number; type: 'pr' | 'issue' }>>`
+  - Uses `GET /search/issues?q=mentions:{login}+is:open+repo:r1+repo:r2...&updated:>={since}`.
+
+- [ ] **Step 1: Extend msw**
+
+Replace `buildServer` in `packages/github-source/test/msw-server.ts` to add the search handler. Append inside `setupServer(...)`:
+
+```ts
+    http.get('https://api.github.com/search/issues', ({ request }) => {
+      const url = new URL(request.url);
+      const q = url.searchParams.get('q') ?? '';
+      if (!q.includes('mentions:me')) return HttpResponse.json({ total_count: 0, items: [] });
+      return HttpResponse.json({
+        total_count: 2,
+        items: [
+          { number: 7, html_url: 'https://github.com/org/r/pull/7', repository_url: 'https://api.github.com/repos/org/r', pull_request: {} },
+          { number: 42, html_url: 'https://github.com/org/r/issues/42', repository_url: 'https://api.github.com/repos/org/r' },
+        ],
+      });
+    }),
+```
+
+- [ ] **Step 2: Write failing test**
+
+Create `packages/github-source/src/fetch-mentions.test.ts`:
+
+```ts
+import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
+import { createOctokit } from './client.js';
+import { fetchMentionedContainers } from './fetch-mentions.js';
+import { buildServer } from '../test/msw-server.js';
+
+const server = buildServer();
+beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
+
+describe('fetchMentionedContainers', () => {
+  it('returns containers distinguished by pr/issue', async () => {
+    const client = createOctokit({ token: 'fake' });
+    const result = await fetchMentionedContainers(client, { login: 'me', repos: ['org/r'] });
+    expect(result.sort((a, b) => a.number - b.number)).toEqual([
+      { repo: 'org/r', number: 7, type: 'pr' },
+      { repo: 'org/r', number: 42, type: 'issue' },
+    ]);
+  });
+
+  it('returns empty list when login has no mentions', async () => {
+    const client = createOctokit({ token: 'fake' });
+    const result = await fetchMentionedContainers(client, { login: 'nobody', repos: ['org/r'] });
+    expect(result).toEqual([]);
+  });
+});
+```
+
+- [ ] **Step 3: Run test, verify failure**
+
+Run: `pnpm --filter @work-summary/github-source test fetch-mentions`
+
+Expected: FAIL.
+
+- [ ] **Step 4: Implement**
+
+Create `packages/github-source/src/fetch-mentions.ts`:
+
+```ts
+import type { GithubClient } from './client.js';
+
+export interface MentionRef {
+  repo: string;
+  number: number;
+  type: 'pr' | 'issue';
+}
+
+export interface FetchMentionsOptions {
+  login: string;
+  repos: string[];
+  since?: string;
+}
+
+function buildQuery(opts: FetchMentionsOptions): string {
+  const repoQ = opts.repos.map((r) => `repo:${r}`).join(' ');
+  const sinceQ = opts.since ? ` updated:>=${opts.since}` : '';
+  return `mentions:${opts.login} is:open ${repoQ}${sinceQ}`.trim();
+}
+
+function repoFromUrl(url: string): string {
+  const idx = url.indexOf('/repos/');
+  if (idx === -1) return '';
+  return url.slice(idx + '/repos/'.length);
+}
+
+export async function fetchMentionedContainers(
+  client: GithubClient,
+  opts: FetchMentionsOptions,
+): Promise<MentionRef[]> {
+  if (opts.repos.length === 0) return [];
+  const q = buildQuery(opts);
+  const items = await client.paginate(client.rest.search.issuesAndPullRequests, { q, per_page: 100 });
+  return items.map((it) => ({
+    repo: repoFromUrl(it.repository_url ?? ''),
+    number: it.number,
+    type: it.pull_request ? ('pr' as const) : ('issue' as const),
+  }));
+}
+```
+
+Append export to `packages/github-source/src/index.ts`:
+
+```ts
+export { fetchMentionedContainers } from './fetch-mentions.js';
+export type { MentionRef, FetchMentionsOptions } from './fetch-mentions.js';
+```
+
+- [ ] **Step 5: Run test, verify pass**
+
+Run: `pnpm --filter @work-summary/github-source test fetch-mentions`
+
+Expected: PASS.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add packages/github-source
+git commit -m "feat(github-source): fetchMentionedContainers via search API"
+```
+
+---
+
+### Task 20: `github-source` - GithubSource (normalize + invoke matchComments)
+
+**Files:**
+- Create: `packages/github-source/src/source.ts`
+- Test: `packages/github-source/src/source.test.ts`
+- Modify: `packages/github-source/src/index.ts`
+
+**Interfaces:**
+- Consumes: all previous github-source fetchers; `matchComments` and types from `@work-summary/core`.
+- Produces:
+  - `interface Source { readonly id: 'github' | 'jira'; fetchPendingComments(opts: FetchOptions): Promise<PendingComment[]>; }`
+  - `interface FetchOptions { repos: string[]; userLogin: string; sinceByRepo: Record<string, string | undefined>; defaultSince: string; rules: MatchRulesConfig; filters: BotFilterConfig; concurrency: number; }`
+  - `class GithubSource implements Source` - for each repo: list open PRs + (open) issues mentioning user; build `RawContainer[]`; call `matchComments`; return all `PendingComment[]` flattened.
+
+- [ ] **Step 1: Write failing integration test**
+
+Create `packages/github-source/src/source.test.ts`:
+
+```ts
+import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
+import { createOctokit } from './client.js';
+import { GithubSource } from './source.js';
+import { buildServer } from '../test/msw-server.js';
+import { http, HttpResponse } from 'msw';
+
+const server = buildServer();
+beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
+
+describe('GithubSource.fetchPendingComments', () => {
+  it('returns matched pending comments from configured repo', async () => {
+    server.use(
+      http.get('https://api.github.com/repos/:owner/:repo/issues/42/comments', () =>
+        HttpResponse.json([
+          { id: 999, body: 'cc @me', html_url: 'https://gh/c/999', user: { login: 'carol', type: 'User' }, created_at: '2026-06-02T10:00:00Z' },
+        ]),
+      ),
+      http.get('https://api.github.com/repos/:owner/:repo/pulls/42/comments', () => HttpResponse.json([])),
+    );
+
+    const client = createOctokit({ token: 'fake' });
+    const source = new GithubSource(client);
+    const result = await source.fetchPendingComments({
+      repos: ['org/r'],
+      userLogin: 'me',
+      sinceByRepo: {},
+      defaultSince: '2026-05-01T00:00:00Z',
+      rules: {
+        authorOfPrUnanswered: true,
+        mentioned: true,
+        repliedBeforeThenFollowup: true,
+        assignee: true,
+        changesRequested: true,
+      },
+      filters: { excludeBots: false, botWhitelist: [] },
+      concurrency: 2,
+    });
+
+    expect(result.length).toBeGreaterThan(0);
+    expect(result.some((c) => c.matchedRules.includes('changes_requested'))).toBe(true);
+    expect(result.some((c) => c.matchedRules.includes('mentioned'))).toBe(true);
+  }, 15000);
+});
+```
+
+- [ ] **Step 2: Run test, verify failure**
+
+Run: `pnpm --filter @work-summary/github-source test source`
+
+Expected: FAIL.
+
+- [ ] **Step 3: Implement source**
+
+Create `packages/github-source/src/source.ts`:
+
+```ts
+import pLimit from 'p-limit';
+import {
+  matchComments,
+  type PendingComment,
+  type MatchRulesConfig,
+  type BotFilterConfig,
+  type RawContainer,
+  type RawComment,
+  type ScanContext,
+} from '@work-summary/core';
+import type { GithubClient } from './client.js';
+import { fetchOpenPullRequests, fetchPullRequestReviews } from './fetch-prs.js';
+import { fetchIssueComments, fetchPrReviewComments } from './fetch-comments.js';
+import { fetchMentionedContainers, type MentionRef } from './fetch-mentions.js';
+
+export interface FetchOptions {
+  repos: string[];
+  userLogin: string;
+  sinceByRepo: Record<string, string | undefined>;
+  defaultSince: string;
+  rules: MatchRulesConfig;
+  filters: BotFilterConfig;
+  concurrency: number;
+}
+
+export interface Source {
+  readonly id: 'github' | 'jira';
+  fetchPendingComments(opts: FetchOptions): Promise<PendingComment[]>;
+}
+
+function dedupComments(comments: RawComment[]): RawComment[] {
+  const seen = new Set<string>();
+  const out: RawComment[] = [];
+  for (const c of comments) {
+    if (seen.has(c.nativeId)) continue;
+    seen.add(c.nativeId);
+    out.push(c);
+  }
+  return out;
+}
+
+export class GithubSource implements Source {
+  readonly id = 'github' as const;
+  constructor(private readonly client: GithubClient) {}
+
+  async fetchPendingComments(opts: FetchOptions): Promise<PendingComment[]> {
+    const limit = pLimit(opts.concurrency);
+    const perRepo = await Promise.all(
+      opts.repos.map((repo) => limit(() => this.scanRepo(repo, opts))),
+    );
+    return perRepo.flat();
+  }
+
+  private async scanRepo(repo: string, opts: FetchOptions): Promise<PendingComment[]> {
+    const since = opts.sinceByRepo[repo] ?? opts.defaultSince;
+    const [prs, mentions] = await Promise.all([
+      fetchOpenPullRequests(this.client, repo),
+      fetchMentionedContainers(this.client, { login: opts.userLogin, repos: [repo], since }),
+    ]);
+
+    const containers: RawContainer[] = [];
+
+    for (const pr of prs) {
+      const [reviews, issueCmt, reviewCmt] = await Promise.all([
+        fetchPullRequestReviews(this.client, repo, pr.number),
+        fetchIssueComments(this.client, repo, pr.number, since),
+        fetchPrReviewComments(this.client, repo, pr.number, since),
+      ]);
+      containers.push({
+        type: 'pr',
+        number: pr.number,
+        title: pr.title,
+        url: pr.htmlUrl,
+        authorLogin: pr.authorLogin,
+        assigneeLogins: pr.assigneeLogins,
+        reviews,
+        lastUserCommitAt: pr.lastCommitAt,
+        comments: dedupComments([...issueCmt, ...reviewCmt]),
+      });
+    }
+
+    const prNumbers = new Set(prs.map((p) => p.number));
+    const issueMentions: MentionRef[] = mentions.filter((m) => m.type === 'issue' && !prNumbers.has(m.number));
+    for (const m of issueMentions) {
+      const comments = await fetchIssueComments(this.client, repo, m.number, since);
+      containers.push({
+        type: 'issue',
+        number: m.number,
+        title: `#${m.number}`,
+        url: `https://github.com/${repo}/issues/${m.number}`,
+        authorLogin: 'unknown',
+        assigneeLogins: [],
+        reviews: [],
+        lastUserCommitAt: null,
+        comments,
+      });
+    }
+
+    const ctx: ScanContext = {
+      source: 'github',
+      repo,
+      userLogin: opts.userLogin,
+      containers,
+    };
+    return matchComments(ctx, opts.rules, opts.filters);
+  }
+}
+```
+
+Append export to `packages/github-source/src/index.ts`:
+
+```ts
+export { GithubSource } from './source.js';
+export type { Source, FetchOptions } from './source.js';
+```
+
+- [ ] **Step 4: Run test, verify pass**
+
+Run: `pnpm --filter @work-summary/github-source test`
+
+Expected: PASS, all github-source tests.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/github-source
+git commit -m "feat(github-source): GithubSource composes fetchers + matchComments"
+```
+
+---
+
+
 
 
