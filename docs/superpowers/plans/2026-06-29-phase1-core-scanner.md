@@ -2192,4 +2192,577 @@ git commit -m "feat(storage): watermarksRepo (get/set per source+repo)"
 
 ---
 
+### Task 13: `notifiers` - Notifier interface + SmtpNotifier skeleton
+
+**Files:**
+- Create: `packages/notifiers/package.json`
+- Create: `packages/notifiers/tsconfig.json`
+- Create: `packages/notifiers/src/index.ts`
+- Create: `packages/notifiers/src/types.ts`
+- Create: `packages/notifiers/src/smtp.ts`
+- Test: `packages/notifiers/src/smtp.test.ts` (skeleton-only test for now)
+
+**Interfaces:**
+- Consumes: `PendingComment` from `@work-summary/core`.
+- Produces:
+  - `interface Notifier { readonly id: string; send(payload: NotificationPayload): Promise<void>; }`
+  - `interface NotificationPayload { subject: string; comments: PendingComment[]; generatedAt: string; }`
+  - `interface SmtpOptions { host: string; port: number; secure: boolean; user: string; pass: string; from: string; to: string; }`
+  - `class SmtpNotifier implements Notifier` - skeleton, throws `Error('not implemented')` from `send` (real impl in Task 15).
+
+- [ ] **Step 1: Create package skeleton**
+
+Create `packages/notifiers/package.json`:
+
+```json
+{
+  "name": "@work-summary/notifiers",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" } },
+  "engines": { "node": ">=20.0.0" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && cp -r src/templates dist/templates",
+    "test": "vitest run",
+    "lint": "eslint src",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@work-summary/core": "workspace:*",
+    "eta": "^3.5.0",
+    "nodemailer": "^6.9.15"
+  },
+  "devDependencies": {
+    "@types/nodemailer": "^6.4.16",
+    "smtp-tester": "^2.1.0",
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.5"
+  }
+}
+```
+
+Create `packages/notifiers/tsconfig.json`:
+
+```json
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "rootDir": "src", "outDir": "dist" },
+  "include": ["src/**/*"]
+}
+```
+
+- [ ] **Step 2: Define types**
+
+Create `packages/notifiers/src/types.ts`:
+
+```ts
+import type { PendingComment } from '@work-summary/core';
+
+export interface NotificationPayload {
+  subject: string;
+  comments: PendingComment[];
+  generatedAt: string;
+}
+
+export interface Notifier {
+  readonly id: string;
+  send(payload: NotificationPayload): Promise<void>;
+}
+
+export interface SmtpOptions {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  pass: string;
+  from: string;
+  to: string;
+}
+```
+
+- [ ] **Step 3: Write failing test for skeleton**
+
+Create `packages/notifiers/src/smtp.test.ts`:
+
+```ts
+import { describe, it, expect } from 'vitest';
+import { SmtpNotifier } from './smtp.js';
+
+describe('SmtpNotifier (skeleton)', () => {
+  it('exposes id "smtp"', () => {
+    const n = new SmtpNotifier({
+      host: 'localhost', port: 25, secure: false, user: 'u', pass: 'p',
+      from: 'a@b', to: 'c@d',
+    });
+    expect(n.id).toBe('smtp');
+  });
+});
+```
+
+- [ ] **Step 4: Run test, verify failure**
+
+Run: `pnpm --filter @work-summary/notifiers test`
+
+Expected: FAIL (module not found).
+
+- [ ] **Step 5: Implement skeleton**
+
+Create `packages/notifiers/src/smtp.ts`:
+
+```ts
+import type { Notifier, NotificationPayload, SmtpOptions } from './types.js';
+
+export class SmtpNotifier implements Notifier {
+  readonly id = 'smtp';
+  constructor(private readonly opts: SmtpOptions) {}
+
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async send(_payload: NotificationPayload): Promise<void> {
+    throw new Error('SmtpNotifier.send not implemented yet');
+  }
+}
+```
+
+Create `packages/notifiers/src/index.ts`:
+
+```ts
+export type { Notifier, NotificationPayload, SmtpOptions } from './types.js';
+export { SmtpNotifier } from './smtp.js';
+```
+
+- [ ] **Step 6: Run test, verify pass**
+
+Run: `pnpm --filter @work-summary/notifiers test`
+
+Expected: PASS, 1 test.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add packages/notifiers
+git commit -m "feat(notifiers): Notifier interface and SmtpNotifier skeleton"
+```
+
+---
+
+### Task 14: `notifiers` - HTML template rendering (eta)
+
+**Files:**
+- Create: `packages/notifiers/src/templates/digest.eta`
+- Create: `packages/notifiers/src/render.ts`
+- Test: `packages/notifiers/src/render.test.ts`
+- Modify: `packages/notifiers/src/index.ts`
+
+**Interfaces:**
+- Consumes: `PendingComment[]` and `NotificationPayload`.
+- Produces:
+  - `renderDigest(payload: NotificationPayload): { html: string; text: string }` - HTML grouped by repo, then PR/issue, then chronological comments. Plain-text fallback included.
+
+- [ ] **Step 1: Write failing test**
+
+Create `packages/notifiers/src/render.test.ts`:
+
+```ts
+import { describe, it, expect } from 'vitest';
+import { renderDigest } from './render.js';
+import type { PendingComment } from '@work-summary/core';
+
+function mk(overrides: Partial<PendingComment>): PendingComment {
+  return {
+    id: 'id1',
+    source: 'github',
+    repo: 'org/a',
+    containerType: 'pr',
+    containerNumber: 1,
+    containerTitle: 'feat: x',
+    containerUrl: 'https://gh/pr/1',
+    commentId: 'c1',
+    commentUrl: 'https://gh/c1',
+    author: { login: 'alice', isBot: false },
+    body: 'please review',
+    createdAt: '2026-06-01T10:00:00Z',
+    matchedRules: ['mentioned'],
+    ...overrides,
+  };
+}
+
+describe('renderDigest', () => {
+  it('renders empty state when no comments', () => {
+    const { html, text } = renderDigest({ subject: 'test', comments: [], generatedAt: '2026-06-01T12:00:00Z' });
+    expect(html).toContain('No new comments');
+    expect(text).toContain('No new comments');
+  });
+
+  it('groups comments by repo then by container', () => {
+    const comments = [
+      mk({ id: '1', repo: 'org/a', containerNumber: 1, commentId: 'c1' }),
+      mk({ id: '2', repo: 'org/a', containerNumber: 2, commentId: 'c2', containerTitle: 'fix: y' }),
+      mk({ id: '3', repo: 'org/b', containerNumber: 7, commentId: 'c3', containerTitle: 'docs' }),
+    ];
+    const { html } = renderDigest({ subject: 's', comments, generatedAt: '2026-06-01T12:00:00Z' });
+    expect(html).toContain('org/a');
+    expect(html).toContain('org/b');
+    expect(html).toContain('feat: x');
+    expect(html).toContain('fix: y');
+    expect(html).toContain('docs');
+    expect(html.indexOf('org/a')).toBeLessThan(html.indexOf('org/b'));
+  });
+
+  it('truncates body to 280 chars and escapes HTML', () => {
+    const long = 'x'.repeat(400) + '<script>alert(1)</script>';
+    const { html } = renderDigest({
+      subject: 's',
+      comments: [mk({ body: long })],
+      generatedAt: '2026-06-01T12:00:00Z',
+    });
+    expect(html).not.toContain('<script>');
+    expect(html).toContain('&lt;script&gt;');
+    expect(html).toMatch(/x{280}/);
+    expect(html).not.toMatch(/x{281}/);
+    expect(html).toContain('...');
+  });
+
+  it('shows matched rules as labels', () => {
+    const { html } = renderDigest({
+      subject: 's',
+      comments: [mk({ matchedRules: ['mentioned', 'assignee'] })],
+      generatedAt: '2026-06-01T12:00:00Z',
+    });
+    expect(html).toContain('mentioned');
+    expect(html).toContain('assignee');
+  });
+});
+```
+
+- [ ] **Step 2: Run test, verify failure**
+
+Run: `pnpm --filter @work-summary/notifiers test render`
+
+Expected: FAIL (module not found).
+
+- [ ] **Step 3: Write template**
+
+Create `packages/notifiers/src/templates/digest.eta`:
+
+```eta
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title><%= it.subject %></title></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#24292f;max-width:720px;margin:0 auto;padding:24px">
+  <h1 style="font-size:20px;border-bottom:1px solid #d0d7de;padding-bottom:8px"><%= it.subject %></h1>
+  <p style="color:#57606a;font-size:13px">Generated at <%= it.generatedAt %></p>
+  <% if (it.groups.length === 0) { %>
+    <p>No new comments since last run.</p>
+  <% } else { %>
+    <% it.groups.forEach(function(group) { %>
+      <h2 style="font-size:16px;margin-top:24px;color:#0969da"><%= group.repo %></h2>
+      <% group.containers.forEach(function(container) { %>
+        <h3 style="font-size:14px;margin-top:12px"><a href="<%= container.url %>" style="color:#0969da;text-decoration:none">#<%= container.number %> <%= container.title %></a></h3>
+        <% container.comments.forEach(function(c) { %>
+          <div style="border:1px solid #d0d7de;border-radius:6px;padding:12px;margin:8px 0;background:#f6f8fa">
+            <div style="font-size:12px;color:#57606a;margin-bottom:6px">
+              <strong>@<%= c.author %></strong> - <%= c.createdAt %>
+              <% c.matchedRules.forEach(function(r) { %>
+                <span style="display:inline-block;background:#dafbe1;color:#1a7f37;padding:2px 6px;border-radius:10px;font-size:11px;margin-left:4px"><%= r %></span>
+              <% }) %>
+            </div>
+            <div style="font-size:13px;white-space:pre-wrap"><%= c.bodyPreview %></div>
+            <a href="<%= c.url %>" style="font-size:12px;color:#0969da">View on GitHub -&gt;</a>
+          </div>
+        <% }) %>
+      <% }) %>
+    <% }) %>
+  <% } %>
+</body>
+</html>
+```
+
+- [ ] **Step 4: Implement renderer**
+
+Create `packages/notifiers/src/render.ts`:
+
+```ts
+import { readFileSync, existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { Eta } from 'eta';
+import type { NotificationPayload } from './types.js';
+import type { PendingComment } from '@work-summary/core';
+
+const BODY_LIMIT = 280;
+
+function templatePath(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const candidates = [join(here, 'templates', 'digest.eta'), join(here, '..', 'src', 'templates', 'digest.eta')];
+  for (const c of candidates) if (existsSync(c)) return c;
+  throw new Error('digest.eta not found');
+}
+
+interface ContainerGroup {
+  number: number;
+  title: string;
+  url: string;
+  comments: Array<{
+    author: string;
+    createdAt: string;
+    bodyPreview: string;
+    url: string;
+    matchedRules: string[];
+  }>;
+}
+
+interface RepoGroup {
+  repo: string;
+  containers: ContainerGroup[];
+}
+
+function truncate(s: string): string {
+  if (s.length <= BODY_LIMIT) return s;
+  return s.slice(0, BODY_LIMIT) + '...';
+}
+
+function group(comments: PendingComment[]): RepoGroup[] {
+  const byRepo = new Map<string, Map<number, ContainerGroup>>();
+  const sorted = [...comments].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  for (const c of sorted) {
+    let repo = byRepo.get(c.repo);
+    if (!repo) {
+      repo = new Map();
+      byRepo.set(c.repo, repo);
+    }
+    let container = repo.get(c.containerNumber);
+    if (!container) {
+      container = { number: c.containerNumber, title: c.containerTitle, url: c.containerUrl, comments: [] };
+      repo.set(c.containerNumber, container);
+    }
+    container.comments.push({
+      author: c.author.login,
+      createdAt: c.createdAt,
+      bodyPreview: truncate(c.body),
+      url: c.commentUrl,
+      matchedRules: c.matchedRules,
+    });
+  }
+  return [...byRepo.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([repo, containers]) => ({
+      repo,
+      containers: [...containers.values()].sort((a, b) => a.number - b.number),
+    }));
+}
+
+function renderText(payload: NotificationPayload, groups: RepoGroup[]): string {
+  if (groups.length === 0) return `${payload.subject}\n\nNo new comments since last run.\n`;
+  const lines: string[] = [payload.subject, `Generated at ${payload.generatedAt}`, ''];
+  for (const g of groups) {
+    lines.push(`== ${g.repo} ==`);
+    for (const c of g.containers) {
+      lines.push(`  #${c.number} ${c.title}  (${c.url})`);
+      for (const cm of c.comments) {
+        lines.push(`    @${cm.author} [${cm.matchedRules.join(',')}] ${cm.createdAt}`);
+        lines.push(`      ${cm.bodyPreview}`);
+        lines.push(`      ${cm.url}`);
+      }
+    }
+    lines.push('');
+  }
+  return lines.join('\n');
+}
+
+const eta = new Eta({ autoEscape: true });
+
+export function renderDigest(payload: NotificationPayload): { html: string; text: string } {
+  const groups = group(payload.comments);
+  const tpl = readFileSync(templatePath(), 'utf8');
+  const html = eta.renderString(tpl, { subject: payload.subject, generatedAt: payload.generatedAt, groups });
+  const text = renderText(payload, groups);
+  return { html, text };
+}
+```
+
+Append to `packages/notifiers/src/index.ts`:
+
+```ts
+export { renderDigest } from './render.js';
+```
+
+- [ ] **Step 5: Run test, verify pass**
+
+Run: `pnpm --filter @work-summary/notifiers test render`
+
+Expected: PASS, 4 tests.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add packages/notifiers
+git commit -m "feat(notifiers): HTML digest template + renderDigest (eta)"
+```
+
+---
+
+### Task 15: `notifiers` - SmtpNotifier real implementation
+
+**Files:**
+- Modify: `packages/notifiers/src/smtp.ts`
+- Test: `packages/notifiers/src/smtp-integration.test.ts`
+
+**Interfaces:**
+- Consumes: `SmtpOptions`, `NotificationPayload`, `renderDigest`.
+- Produces:
+  - `SmtpNotifier.send(payload)` opens a `nodemailer` transport, sends an email with `subject = payload.subject`, `from = opts.from`, `to = opts.to`, both `html` and `text` bodies from `renderDigest`.
+  - On failure, throws an `Error` whose `name === 'SmtpError'` (used by CLI to map to exit code 4).
+
+- [ ] **Step 1: Write failing integration test**
+
+Create `packages/notifiers/src/smtp-integration.test.ts`:
+
+```ts
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import smtpTester from 'smtp-tester';
+import { SmtpNotifier } from './smtp.js';
+import type { PendingComment } from '@work-summary/core';
+
+const PORT = 4025;
+let mailServer: ReturnType<typeof smtpTester.init>;
+
+beforeAll(() => {
+  mailServer = smtpTester.init(PORT);
+});
+
+afterAll(() => {
+  mailServer.stop(() => undefined);
+});
+
+function sampleComment(): PendingComment {
+  return {
+    id: 'x', source: 'github', repo: 'org/a', containerType: 'pr', containerNumber: 1,
+    containerTitle: 'feat', containerUrl: 'https://gh/pr/1',
+    commentId: 'c1', commentUrl: 'https://gh/c1',
+    author: { login: 'alice', isBot: false }, body: 'please review',
+    createdAt: '2026-06-01T10:00:00Z', matchedRules: ['mentioned'],
+  };
+}
+
+describe('SmtpNotifier (integration via smtp-tester)', () => {
+  it('sends an email with subject, html and text bodies', async () => {
+    const n = new SmtpNotifier({
+      host: '127.0.0.1', port: PORT, secure: false, user: '', pass: '',
+      from: 'sender@test', to: 'me@test',
+    });
+
+    const received = new Promise<{ subject: string; html: string; text: string }>((resolve) => {
+      mailServer.bind((_addr: string, _id: number, email: { headers: { subject: string }; html: string; body: string }) => {
+        resolve({ subject: email.headers.subject, html: email.html, text: email.body });
+      });
+    });
+
+    await n.send({ subject: '[work-summary] 1 new', comments: [sampleComment()], generatedAt: '2026-06-01T12:00:00Z' });
+
+    const email = await received;
+    expect(email.subject).toBe('[work-summary] 1 new');
+    expect(email.html).toContain('org/a');
+    expect(email.html).toContain('please review');
+    expect(email.text).toContain('org/a');
+  }, 15000);
+
+  it('throws SmtpError when host unreachable', async () => {
+    const n = new SmtpNotifier({
+      host: '127.0.0.1', port: 1, secure: false, user: '', pass: '',
+      from: 'a@b', to: 'c@d',
+    });
+    await expect(
+      n.send({ subject: 's', comments: [], generatedAt: '2026-06-01T12:00:00Z' }),
+    ).rejects.toMatchObject({ name: 'SmtpError' });
+  }, 15000);
+});
+```
+
+- [ ] **Step 2: Run test, verify failure**
+
+Run: `pnpm --filter @work-summary/notifiers test smtp-integration`
+
+Expected: FAIL (current send throws 'not implemented').
+
+- [ ] **Step 3: Implement send()**
+
+Replace `packages/notifiers/src/smtp.ts` with:
+
+```ts
+import nodemailer, { type Transporter } from 'nodemailer';
+import { renderDigest } from './render.js';
+import type { Notifier, NotificationPayload, SmtpOptions } from './types.js';
+
+export class SmtpError extends Error {
+  override readonly name = 'SmtpError';
+}
+
+export class SmtpNotifier implements Notifier {
+  readonly id = 'smtp';
+  private transporter: Transporter;
+
+  constructor(private readonly opts: SmtpOptions) {
+    this.transporter = nodemailer.createTransport({
+      host: opts.host,
+      port: opts.port,
+      secure: opts.secure,
+      auth: opts.user || opts.pass ? { user: opts.user, pass: opts.pass } : undefined,
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 15000,
+    });
+  }
+
+  async send(payload: NotificationPayload): Promise<void> {
+    const { html, text } = renderDigest(payload);
+    try {
+      await this.transporter.sendMail({
+        from: this.opts.from,
+        to: this.opts.to,
+        subject: payload.subject,
+        html,
+        text,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new SmtpError(`SMTP send failed: ${msg}`);
+    }
+  }
+
+  async verify(): Promise<void> {
+    try {
+      await this.transporter.verify();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new SmtpError(`SMTP verify failed: ${msg}`);
+    }
+  }
+}
+```
+
+Append export to `packages/notifiers/src/index.ts`:
+
+```ts
+export { SmtpError } from './smtp.js';
+```
+
+- [ ] **Step 4: Run all notifier tests**
+
+Run: `pnpm --filter @work-summary/notifiers test`
+
+Expected: PASS, all tests (skeleton, render, integration).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/notifiers
+git commit -m "feat(notifiers): SmtpNotifier send/verify via nodemailer + SmtpError"
+```
+
+---
+
+
 
