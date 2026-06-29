@@ -1,0 +1,34 @@
+{
+  "name": "@work-summary/github-source",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "lint": "eslint src test",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@work-summary/core": "workspace:*",
+    "@octokit/rest": "^21.0.2",
+    "@octokit/plugin-throttling": "^9.3.2",
+    "p-limit": "^6.1.0"
+  },
+  "devDependencies": {
+    "msw": "^2.4.9",
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.5"
+  }
+}
