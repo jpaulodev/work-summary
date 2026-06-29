@@ -58,26 +58,36 @@ export class GithubSource implements Source {
       fetchMentionedContainers(this.client, { login: opts.userLogin, repos: [repo], since }),
     ]);
 
-    const containers: RawContainer[] = [];
-
-    for (const pr of prs) {
-      const [reviews, issueCmt, reviewCmt] = await Promise.all([
-        fetchPullRequestReviews(this.client, repo, pr.number),
-        fetchIssueComments(this.client, repo, pr.number, since),
-        fetchPrReviewComments(this.client, repo, pr.number, since),
-      ]);
-      containers.push({
-        type: 'pr',
-        number: pr.number,
-        title: pr.title,
-        url: pr.htmlUrl,
-        authorLogin: pr.authorLogin,
-        assigneeLogins: pr.assigneeLogins,
-        reviews,
-        lastUserCommitAt: pr.lastCommitAt,
-        comments: dedupComments([...issueCmt, ...reviewCmt]),
-      });
-    }
+    // Each PR's fetches are independent, so run them concurrently (bounded by a
+    // dedicated limiter to avoid hammering the API on PR-heavy repos). A
+    // separate limiter is used so it cannot deadlock against the repo-level one.
+    const prLimit = pLimit(opts.concurrency);
+    const containers: RawContainer[] = await Promise.all(
+      prs.map((pr) =>
+        prLimit(async () => {
+          const [reviews, issueCmt, reviewCmt] = await Promise.all([
+            // Reviews are only consumed by the changesRequested rule, so skip the
+            // extra paginated call when that rule is disabled.
+            opts.rules.changesRequested
+              ? fetchPullRequestReviews(this.client, repo, pr.number)
+              : Promise.resolve([]),
+            fetchIssueComments(this.client, repo, pr.number, since),
+            fetchPrReviewComments(this.client, repo, pr.number, since),
+          ]);
+          return {
+            type: 'pr' as const,
+            number: pr.number,
+            title: pr.title,
+            url: pr.htmlUrl,
+            authorLogin: pr.authorLogin,
+            assigneeLogins: pr.assigneeLogins,
+            reviews,
+            lastUserCommitAt: pr.lastCommitAt,
+            comments: dedupComments([...issueCmt, ...reviewCmt]),
+          };
+        }),
+      ),
+    );
 
     const prNumbers = new Set(prs.map((p) => p.number));
     const issueMentions: MentionRef[] = mentions.filter(

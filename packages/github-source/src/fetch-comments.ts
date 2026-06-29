@@ -1,15 +1,6 @@
 import type { RawComment } from '@work-summary/core';
 import type { GithubClient } from './client.js';
-
-function splitRepo(repo: string): { owner: string; repo: string } {
-  const [owner, name] = repo.split('/');
-  if (!owner || !name) throw new Error(`Invalid repo "${repo}"`);
-  return { owner, repo: name };
-}
-
-function isBot(login: string, type: string | undefined): boolean {
-  return type === 'Bot' || login.endsWith('[bot]');
-}
+import { splitRepo, toRawComment } from './repo.js';
 
 export async function fetchIssueComments(
   client: GithubClient,
@@ -32,13 +23,7 @@ export async function fetchIssueComments(
   };
   if (since) params.since = since;
   const items = await client.paginate(client.rest.issues.listComments, params);
-  return items.map((c) => ({
-    nativeId: String(c.id),
-    url: c.html_url,
-    author: { login: c.user?.login ?? 'ghost', isBot: isBot(c.user?.login ?? '', c.user?.type) },
-    body: c.body ?? '',
-    createdAt: c.created_at,
-  }));
+  return items.map(toRawComment);
 }
 
 export async function fetchPrReviewComments(
@@ -62,11 +47,5 @@ export async function fetchPrReviewComments(
   };
   if (since) params.since = since;
   const items = await client.paginate(client.rest.pulls.listReviewComments, params);
-  return items.map((c) => ({
-    nativeId: String(c.id),
-    url: c.html_url,
-    author: { login: c.user?.login ?? 'ghost', isBot: isBot(c.user?.login ?? '', c.user?.type) },
-    body: c.body ?? '',
-    createdAt: c.created_at,
-  }));
+  return items.map(toRawComment);
 }

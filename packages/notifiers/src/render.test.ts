@@ -73,6 +73,34 @@ describe('renderDigest', () => {
     expect(html).toContain('&lt;script&gt;');
   });
 
+  it('does not merge a PR and an issue that share the same number', () => {
+    const comments = [
+      mk({
+        id: '1',
+        repo: 'org/a',
+        containerType: 'pr',
+        containerNumber: 42,
+        containerTitle: 'PR forty-two',
+        commentId: 'cpr',
+      }),
+      mk({
+        id: '2',
+        repo: 'org/a',
+        containerType: 'issue',
+        containerNumber: 42,
+        containerTitle: 'Issue forty-two',
+        commentId: 'cissue',
+      }),
+    ];
+    const { html } = renderDigest({
+      subject: 's',
+      comments,
+      generatedAt: '2026-06-01T12:00:00Z',
+    });
+    expect(html).toContain('PR forty-two');
+    expect(html).toContain('Issue forty-two');
+  });
+
   it('shows matched rules as labels', () => {
     const { html } = renderDigest({
       subject: 's',

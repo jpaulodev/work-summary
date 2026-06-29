@@ -1,5 +1,6 @@
 import type { RawReview } from '@work-summary/core';
 import type { GithubClient } from './client.js';
+import { splitRepo, isBot } from './repo.js';
 
 export interface RawPullRequest {
   number: number;
@@ -7,17 +8,10 @@ export interface RawPullRequest {
   htmlUrl: string;
   authorLogin: string;
   assigneeLogins: string[];
+  // Timestamp of the PR head commit. Used as a proxy for "was the PR pushed to
+  // after a review?". NOTE: this is the tip commit by whoever pushed last, not
+  // necessarily the current user - see follow-up about author-scoping rule F.
   lastCommitAt: string | null;
-}
-
-function splitRepo(repo: string): { owner: string; repo: string } {
-  const [owner, name] = repo.split('/');
-  if (!owner || !name) throw new Error(`Invalid repo "${repo}", expected "owner/name"`);
-  return { owner, repo: name };
-}
-
-function isBot(login: string, type: string | undefined): boolean {
-  return type === 'Bot' || login.endsWith('[bot]');
 }
 
 export async function fetchOpenPullRequests(
@@ -37,7 +31,10 @@ export async function fetchOpenPullRequests(
     if (p.head?.sha) {
       try {
         const commit = await client.rest.repos.getCommit({ owner, repo: name, ref: p.head.sha });
-        lastCommitAt = commit.data.commit.author?.date ?? null;
+        // Committer date reflects when the commit actually landed; fall back to
+        // author date (e.g. rebased commits keep an older author date).
+        lastCommitAt =
+          commit.data.commit.committer?.date ?? commit.data.commit.author?.date ?? null;
       } catch {
         lastCommitAt = null;
       }

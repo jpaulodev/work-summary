@@ -41,7 +41,9 @@ function truncate(s: string): string {
 }
 
 function group(comments: PendingComment[]): RepoGroup[] {
-  const byRepo = new Map<string, Map<number, ContainerGroup>>();
+  // Key containers by type AND number: GitHub PRs and issues share one numbering
+  // space, so issue #42 and PR #42 in the same repo must not be merged.
+  const byRepo = new Map<string, Map<string, ContainerGroup>>();
   const sorted = [...comments].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   for (const c of sorted) {
     let repo = byRepo.get(c.repo);
@@ -49,7 +51,8 @@ function group(comments: PendingComment[]): RepoGroup[] {
       repo = new Map();
       byRepo.set(c.repo, repo);
     }
-    let container = repo.get(c.containerNumber);
+    const containerKey = `${c.containerType}:${c.containerNumber}`;
+    let container = repo.get(containerKey);
     if (!container) {
       container = {
         number: c.containerNumber,
@@ -57,7 +60,7 @@ function group(comments: PendingComment[]): RepoGroup[] {
         url: c.containerUrl,
         comments: [],
       };
-      repo.set(c.containerNumber, container);
+      repo.set(containerKey, container);
     }
     container.comments.push({
       author: c.author.login,
