@@ -3639,6 +3639,1319 @@ git commit -m "feat(github-source): GithubSource composes fetchers + matchCommen
 
 ---
 
+### Task 21: `cli` - config loader (zod + YAML + env interpolation)
+
+**Files:**
+- Create: `apps/cli/package.json`
+- Create: `apps/cli/tsconfig.json`
+- Create: `apps/cli/src/config.ts`
+- Test: `apps/cli/src/config.test.ts`
+
+**Interfaces:**
+- Consumes: nothing.
+- Produces:
+  - `loadConfig(path: string, env: NodeJS.ProcessEnv): Config` - reads YAML, interpolates `${VAR}` from `env`, validates via zod, throws `ConfigError` (name === 'ConfigError') on any problem.
+  - `interface Config { user; sources; scan; notifications; logging }` matching the spec YAML schema.
+  - `class ConfigError extends Error { override readonly name = 'ConfigError' }`.
+
+- [ ] **Step 1: Create app skeleton**
+
+Create `apps/cli/package.json`:
+
+```json
+{
+  "name": "@work-summary/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": { "work-summary": "./dist/bin.js" },
+  "engines": { "node": ">=20.0.0" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && chmod +x dist/bin.js",
+    "test": "vitest run",
+    "lint": "eslint src",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@work-summary/core": "workspace:*",
+    "@work-summary/github-source": "workspace:*",
+    "@work-summary/notifiers": "workspace:*",
+    "@work-summary/storage": "workspace:*",
+    "commander": "^12.1.0",
+    "pino": "^9.4.0",
+    "pino-pretty": "^11.2.2",
+    "yaml": "^2.5.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.5"
+  }
+}
+```
+
+Create `apps/cli/tsconfig.json`:
+
+```json
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "rootDir": "src", "outDir": "dist" },
+  "include": ["src/**/*"]
+}
+```
+
+- [ ] **Step 2: Write failing test**
+
+Create `apps/cli/src/config.test.ts`:
+
+```ts
+import { describe, it, expect } from 'vitest';
+import { writeFileSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { loadConfig, ConfigError } from './config.js';
+
+function writeTmp(yaml: string): string {
+  const dir = mkdtempSync(join(tmpdir(), 'ws-conf-'));
+  const path = join(dir, 'config.yaml');
+  writeFileSync(path, yaml);
+  return path;
+}
+
+const validYaml = `
+user:
+  githubLogin: me
+sources:
+  github:
+    token: \${GH}
+    repos: [org/a]
+    rules:
+      authorOfPrUnanswered: true
+      mentioned: true
+      repliedBeforeThenFollowup: true
+      assignee: true
+      changesRequested: true
+    filters:
+      excludeBots: true
+      botWhitelist: []
+scan:
+  lookbackDays: 7
+  concurrency: 3
+notifications:
+  - id: primary
+    type: smtp
+    enabled: true
+    smtp:
+      host: smtp.test
+      port: 587
+      secure: false
+      user: \${SU}
+      pass: \${SP}
+    from: a@b
+    to: c@d
+    subjectTemplate: "[ws] {{count}} - {{date}}"
+logging:
+  level: info
+  file: ~/.local/state/work-summary/scan.log
+`;
+
+describe('loadConfig', () => {
+  it('parses valid yaml and interpolates env vars', () => {
+    const p = writeTmp(validYaml);
+    const cfg = loadConfig(p, { GH: 'tok', SU: 'u', SP: 'p' });
+    expect(cfg.user.githubLogin).toBe('me');
+    expect(cfg.sources.github.token).toBe('tok');
+    expect(cfg.notifications[0]?.smtp.user).toBe('u');
+  });
+
+  it('throws ConfigError on missing required field', () => {
+    const p = writeTmp('user:\n  githubLogin: me\n');
+    expect(() => loadConfig(p, {})).toThrow(ConfigError);
+  });
+
+  it('throws ConfigError when env var unresolved', () => {
+    const p = writeTmp(validYaml);
+    expect(() => loadConfig(p, {})).toThrow(/GH/);
+  });
+
+  it('throws ConfigError on invalid YAML', () => {
+    const p = writeTmp('this: is: not: yaml: ::');
+    expect(() => loadConfig(p, {})).toThrow(ConfigError);
+  });
+});
+```
+
+- [ ] **Step 3: Run test, verify failure**
+
+Run: `pnpm --filter @work-summary/cli test config`
+
+Expected: FAIL (module not found).
+
+- [ ] **Step 4: Implement**
+
+Create `apps/cli/src/config.ts`:
+
+```ts
+import { readFileSync } from 'node:fs';
+import { parse as parseYaml } from 'yaml';
+import { z } from 'zod';
+
+export class ConfigError extends Error {
+  override readonly name = 'ConfigError';
+}
+
+const RulesSchema = z.object({
+  authorOfPrUnanswered: z.boolean(),
+  mentioned: z.boolean(),
+  repliedBeforeThenFollowup: z.boolean(),
+  assignee: z.boolean(),
+  changesRequested: z.boolean(),
+});
+
+const FiltersSchema = z.object({
+  excludeBots: z.boolean(),
+  botWhitelist: z.array(z.string()),
+});
+
+const SmtpSchema = z.object({
+  host: z.string().min(1),
+  port: z.number().int().positive(),
+  secure: z.boolean(),
+  user: z.string(),
+  pass: z.string(),
+});
+
+const NotificationSchema = z.object({
+  id: z.string().min(1),
+  type: z.literal('smtp'),
+  enabled: z.boolean(),
+  smtp: SmtpSchema,
+  from: z.string().min(1),
+  to: z.string().min(1),
+  subjectTemplate: z.string().min(1),
+});
+
+const ConfigSchema = z.object({
+  user: z.object({ githubLogin: z.string().min(1) }),
+  sources: z.object({
+    github: z.object({
+      token: z.string().min(1),
+      repos: z.array(z.string().regex(/^[^/]+\/[^/]+$/)).min(1),
+      rules: RulesSchema,
+      filters: FiltersSchema,
+    }),
+  }),
+  scan: z.object({
+    lookbackDays: z.number().int().positive(),
+    concurrency: z.number().int().positive(),
+  }),
+  notifications: z.array(NotificationSchema).min(1),
+  logging: z.object({
+    level: z.enum(['debug', 'info', 'warn', 'error']),
+    file: z.string().min(1),
+  }),
+});
+
+export type Config = z.infer<typeof ConfigSchema>;
+
+const ENV_RE = /\$\{([A-Z_][A-Z0-9_]*)\}/g;
+
+function interpolate(raw: string, env: NodeJS.ProcessEnv): string {
+  const missing: string[] = [];
+  const out = raw.replace(ENV_RE, (_, name: string) => {
+    const v = env[name];
+    if (v === undefined) {
+      missing.push(name);
+      return '';
+    }
+    return v;
+  });
+  if (missing.length > 0) {
+    throw new ConfigError(`Unresolved environment variables: ${[...new Set(missing)].join(', ')}`);
+  }
+  return out;
+}
+
+export function loadConfig(path: string, env: NodeJS.ProcessEnv): Config {
+  let raw: string;
+  try {
+    raw = readFileSync(path, 'utf8');
+  } catch (err) {
+    throw new ConfigError(`Cannot read config at ${path}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  const interpolated = interpolate(raw, env);
+  let parsed: unknown;
+  try {
+    parsed = parseYaml(interpolated);
+  } catch (err) {
+    throw new ConfigError(`Invalid YAML in ${path}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  const result = ConfigSchema.safeParse(parsed);
+  if (!result.success) {
+    throw new ConfigError(`Invalid config: ${result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`);
+  }
+  return result.data;
+}
+```
+
+- [ ] **Step 5: Run test, verify pass**
+
+Run: `pnpm --filter @work-summary/cli test config`
+
+Expected: PASS, 4 tests.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add apps/cli
+git commit -m "feat(cli): loadConfig (YAML + env interpolation + zod validation)"
+```
+
+---
+
+### Task 22: `cli` - logger setup (pino)
+
+**Files:**
+- Create: `apps/cli/src/logger.ts`
+- Test: `apps/cli/src/logger.test.ts`
+
+**Interfaces:**
+- Consumes: `Config['logging']`.
+- Produces:
+  - `createLogger(opts: { level: 'debug'|'info'|'warn'|'error'; file: string; runId?: number; jsonOnly?: boolean }): pino.Logger`
+  - Writes structured JSON to `file`; pretty-prints to stderr when TTY and not `jsonOnly`.
+  - When `runId` provided, every log line includes `runId` field.
+
+- [ ] **Step 1: Write failing test**
+
+Create `apps/cli/src/logger.test.ts`:
+
+```ts
+import { describe, it, expect } from 'vitest';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createLogger } from './logger.js';
+
+describe('createLogger', () => {
+  it('writes JSON lines to file', async () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'ws-log-')), 'scan.log');
+    const log = createLogger({ level: 'info', file, jsonOnly: true });
+    log.info({ a: 1 }, 'hello');
+    await new Promise((r) => setTimeout(r, 50));
+    const content = readFileSync(file, 'utf8');
+    expect(content).toContain('"msg":"hello"');
+    expect(content).toContain('"a":1');
+  });
+
+  it('tags every line with runId when provided', async () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'ws-log-')), 'scan.log');
+    const log = createLogger({ level: 'info', file, runId: 42, jsonOnly: true });
+    log.info('hi');
+    await new Promise((r) => setTimeout(r, 50));
+    const content = readFileSync(file, 'utf8');
+    expect(content).toContain('"runId":42');
+  });
+});
+```
+
+- [ ] **Step 2: Run test, verify failure**
+
+Run: `pnpm --filter @work-summary/cli test logger`
+
+Expected: FAIL.
+
+- [ ] **Step 3: Implement**
+
+Create `apps/cli/src/logger.ts`:
+
+```ts
+import { homedir } from 'node:os';
+import { mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
+import pino, { type Logger } from 'pino';
+
+function expandHome(p: string): string {
+  return p.startsWith('~') ? p.replace(/^~/, homedir()) : p;
+}
+
+export interface LoggerOptions {
+  level: 'debug' | 'info' | 'warn' | 'error';
+  file: string;
+  runId?: number;
+  jsonOnly?: boolean;
+}
+
+export function createLogger(opts: LoggerOptions): Logger {
+  const file = expandHome(opts.file);
+  mkdirSync(dirname(file), { recursive: true });
+
+  const fileStream = pino.destination({ dest: file, append: true, sync: false });
+  const streams: { stream: NodeJS.WritableStream; level?: pino.Level }[] = [{ stream: fileStream }];
+
+  const wantPretty = !opts.jsonOnly && process.stderr.isTTY;
+  if (wantPretty) {
+    const pretty = pino.transport({ target: 'pino-pretty', options: { destination: 2, colorize: true } });
+    streams.push({ stream: pretty });
+  } else if (!opts.jsonOnly) {
+    streams.push({ stream: process.stderr });
+  }
+
+  const base = opts.runId !== undefined ? { runId: opts.runId } : {};
+  return pino({ level: opts.level, base }, pino.multistream(streams));
+}
+```
+
+- [ ] **Step 4: Run test, verify pass**
+
+Run: `pnpm --filter @work-summary/cli test logger`
+
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add apps/cli
+git commit -m "feat(cli): pino logger with runId tag and file+stderr streams"
+```
+
+---
+
+### Task 23: `cli` - `init` command
+
+**Files:**
+- Create: `apps/cli/src/commands/init.ts`
+- Create: `apps/cli/src/paths.ts`
+- Test: `apps/cli/src/commands/init.test.ts`
+
+**Interfaces:**
+- Consumes: nothing.
+- Produces:
+  - `runInit(opts: { configPath: string; stateDir: string; force?: boolean }): { written: boolean; configPath: string; stateDir: string }`
+  - Writes a templated `config.yaml` (commented placeholders) and creates the state dir. Throws if `config.yaml` exists and `force` is not set.
+  - `paths.ts` exports `defaultConfigPath()` and `defaultStateDir()` using XDG dirs with `~` fallback.
+
+- [ ] **Step 1: Write failing test**
+
+Create `apps/cli/src/commands/init.test.ts`:
+
+```ts
+import { describe, it, expect, beforeEach } from 'vitest';
+import { mkdtempSync, existsSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { runInit } from './init.js';
+
+let tmp: string;
+beforeEach(() => {
+  tmp = mkdtempSync(join(tmpdir(), 'ws-init-'));
+});
+
+describe('runInit', () => {
+  it('creates config file and state dir on fresh system', () => {
+    const cfg = join(tmp, 'config.yaml');
+    const state = join(tmp, 'state');
+    const res = runInit({ configPath: cfg, stateDir: state });
+    expect(res.written).toBe(true);
+    expect(existsSync(cfg)).toBe(true);
+    expect(existsSync(state)).toBe(true);
+    expect(readFileSync(cfg, 'utf8')).toContain('githubLogin');
+  });
+
+  it('throws when config exists and force=false', () => {
+    const cfg = join(tmp, 'config.yaml');
+    const state = join(tmp, 'state');
+    runInit({ configPath: cfg, stateDir: state });
+    expect(() => runInit({ configPath: cfg, stateDir: state })).toThrow(/already exists/);
+  });
+
+  it('overwrites when force=true', () => {
+    const cfg = join(tmp, 'config.yaml');
+    const state = join(tmp, 'state');
+    runInit({ configPath: cfg, stateDir: state });
+    const res = runInit({ configPath: cfg, stateDir: state, force: true });
+    expect(res.written).toBe(true);
+  });
+});
+```
+
+- [ ] **Step 2: Run test, verify failure**
+
+Run: `pnpm --filter @work-summary/cli test init`
+
+Expected: FAIL.
+
+- [ ] **Step 3: Implement paths and init**
+
+Create `apps/cli/src/paths.ts`:
+
+```ts
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+
+function xdg(envVar: string, fallback: string): string {
+  const v = process.env[envVar];
+  if (v && v.length > 0) return v;
+  return join(homedir(), fallback);
+}
+
+export function defaultConfigPath(): string {
+  return join(xdg('XDG_CONFIG_HOME', '.config'), 'work-summary', 'config.yaml');
+}
+
+export function defaultStateDir(): string {
+  return join(xdg('XDG_STATE_HOME', '.local/state'), 'work-summary');
+}
+
+export function defaultDbPath(): string {
+  return join(defaultStateDir(), 'state.db');
+}
+```
+
+Create `apps/cli/src/commands/init.ts`:
+
+```ts
+import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { dirname } from 'node:path';
+
+const CONFIG_TEMPLATE = `# work-summary configuration
+user:
+  githubLogin: your-github-login
+
+sources:
+  github:
+    token: \${GITHUB_TOKEN}
+    repos:
+      - org/repo-foo
+      - org/repo-bar
+    rules:
+      authorOfPrUnanswered: true
+      mentioned: true
+      repliedBeforeThenFollowup: true
+      assignee: true
+      changesRequested: true
+    filters:
+      excludeBots: true
+      botWhitelist: []
+
+scan:
+  lookbackDays: 7
+  concurrency: 3
+
+notifications:
+  - id: primary-email
+    type: smtp
+    enabled: true
+    smtp:
+      host: smtp.gmail.com
+      port: 587
+      secure: false
+      user: \${SMTP_USER}
+      pass: \${SMTP_PASS}
+    from: "Work Summary <me@example.com>"
+    to: me@example.com
+    subjectTemplate: "[work-summary] {{count}} new comments - {{date}}"
+
+logging:
+  level: info
+  file: ~/.local/state/work-summary/scan.log
+`;
+
+export interface InitOptions {
+  configPath: string;
+  stateDir: string;
+  force?: boolean;
+}
+
+export function runInit(opts: InitOptions): { written: boolean; configPath: string; stateDir: string } {
+  if (existsSync(opts.configPath) && !opts.force) {
+    throw new Error(`Config already exists at ${opts.configPath} (use --force to overwrite)`);
+  }
+  mkdirSync(dirname(opts.configPath), { recursive: true });
+  mkdirSync(opts.stateDir, { recursive: true });
+  writeFileSync(opts.configPath, CONFIG_TEMPLATE);
+  return { written: true, configPath: opts.configPath, stateDir: opts.stateDir };
+}
+```
+
+- [ ] **Step 4: Run test, verify pass**
+
+Run: `pnpm --filter @work-summary/cli test init`
+
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add apps/cli
+git commit -m "feat(cli): init command (writes starter config, creates state dir)"
+```
+
+---
+
+### Task 24: `cli` - `doctor` command
+
+**Files:**
+- Create: `apps/cli/src/commands/doctor.ts`
+- Test: `apps/cli/src/commands/doctor.test.ts`
+
+**Interfaces:**
+- Consumes: `Config`, `GithubClient`, `SmtpNotifier`, `openDatabase`, `runMigrations`.
+- Produces:
+  - `runDoctor(opts: { config: Config; deps: DoctorDeps }): Promise<DoctorResult>`
+  - `interface DoctorDeps { makeOctokit: (token: string) => GithubClient; makeSmtp: (opts: SmtpOptions) => { verify(): Promise<void> }; openDb: (path: string) => SqliteDatabase; dbPath: string; }`
+  - `interface DoctorResult { checks: Array<{ name: string; ok: boolean; message?: string }>; allOk: boolean }`
+
+- [ ] **Step 1: Write failing test**
+
+Create `apps/cli/src/commands/doctor.test.ts`:
+
+```ts
+import { describe, it, expect } from 'vitest';
+import { runDoctor } from './doctor.js';
+import type { Config } from '../config.js';
+
+const cfg: Config = {
+  user: { githubLogin: 'me' },
+  sources: {
+    github: {
+      token: 't', repos: ['org/r'],
+      rules: { authorOfPrUnanswered: true, mentioned: true, repliedBeforeThenFollowup: true, assignee: true, changesRequested: true },
+      filters: { excludeBots: false, botWhitelist: [] },
+    },
+  },
+  scan: { lookbackDays: 7, concurrency: 3 },
+  notifications: [{
+    id: 'n', type: 'smtp', enabled: true,
+    smtp: { host: 'h', port: 25, secure: false, user: 'u', pass: 'p' },
+    from: 'a', to: 'b', subjectTemplate: 's',
+  }],
+  logging: { level: 'info', file: '/tmp/x.log' },
+};
+
+const okDeps = {
+  makeOctokit: () => ({ rest: { users: { getAuthenticated: async () => ({ data: { login: 'me' } }) } } } as never),
+  makeSmtp: () => ({ verify: async () => undefined }),
+  openDb: () => ({ pragma: () => undefined, exec: () => undefined, prepare: () => ({ all: () => [], get: () => undefined, run: () => undefined }) } as never),
+  dbPath: ':memory:',
+};
+
+describe('runDoctor', () => {
+  it('returns all checks ok when deps succeed', async () => {
+    const r = await runDoctor({ config: cfg, deps: okDeps });
+    expect(r.allOk).toBe(true);
+    expect(r.checks.find((c) => c.name === 'github')?.ok).toBe(true);
+    expect(r.checks.find((c) => c.name === 'smtp')?.ok).toBe(true);
+    expect(r.checks.find((c) => c.name === 'storage')?.ok).toBe(true);
+  });
+
+  it('reports github failure on auth error', async () => {
+    const r = await runDoctor({
+      config: cfg,
+      deps: {
+        ...okDeps,
+        makeOctokit: () => ({ rest: { users: { getAuthenticated: () => Promise.reject(new Error('401')) } } } as never),
+      },
+    });
+    expect(r.allOk).toBe(false);
+    expect(r.checks.find((c) => c.name === 'github')?.ok).toBe(false);
+  });
+
+  it('reports smtp failure', async () => {
+    const r = await runDoctor({
+      config: cfg,
+      deps: { ...okDeps, makeSmtp: () => ({ verify: () => Promise.reject(new Error('refused')) }) },
+    });
+    expect(r.checks.find((c) => c.name === 'smtp')?.ok).toBe(false);
+  });
+});
+```
+
+- [ ] **Step 2: Run test, verify failure**
+
+Run: `pnpm --filter @work-summary/cli test doctor`
+
+Expected: FAIL.
+
+- [ ] **Step 3: Implement**
+
+Create `apps/cli/src/commands/doctor.ts`:
+
+```ts
+import type { Config } from '../config.js';
+
+export interface DoctorCheck {
+  name: 'config' | 'github' | 'smtp' | 'storage';
+  ok: boolean;
+  message?: string;
+}
+
+export interface DoctorResult {
+  checks: DoctorCheck[];
+  allOk: boolean;
+}
+
+export interface DoctorDeps {
+  makeOctokit: (token: string) => { rest: { users: { getAuthenticated: () => Promise<{ data: { login: string } }> } } };
+  makeSmtp: (opts: Config['notifications'][number]['smtp'] & { from: string; to: string }) => { verify: () => Promise<void> };
+  openDb: (path: string) => { pragma: (s: string) => unknown; exec: (s: string) => void; prepare: (s: string) => { all: () => unknown[]; get: () => unknown; run: () => void } };
+  dbPath: string;
+}
+
+export async function runDoctor(args: { config: Config; deps: DoctorDeps }): Promise<DoctorResult> {
+  const checks: DoctorCheck[] = [{ name: 'config', ok: true }];
+
+  try {
+    const client = args.deps.makeOctokit(args.config.sources.github.token);
+    const me = await client.rest.users.getAuthenticated();
+    checks.push({ name: 'github', ok: true, message: `Authenticated as ${me.data.login}` });
+  } catch (err) {
+    checks.push({ name: 'github', ok: false, message: err instanceof Error ? err.message : String(err) });
+  }
+
+  for (const n of args.config.notifications) {
+    if (!n.enabled) continue;
+    try {
+      const smtp = args.deps.makeSmtp({ ...n.smtp, from: n.from, to: n.to });
+      await smtp.verify();
+      checks.push({ name: 'smtp', ok: true, message: `${n.smtp.host}:${n.smtp.port}` });
+    } catch (err) {
+      checks.push({ name: 'smtp', ok: false, message: err instanceof Error ? err.message : String(err) });
+    }
+    break;
+  }
+
+  try {
+    const db = args.deps.openDb(args.deps.dbPath);
+    db.pragma('user_version');
+    checks.push({ name: 'storage', ok: true, message: args.deps.dbPath });
+  } catch (err) {
+    checks.push({ name: 'storage', ok: false, message: err instanceof Error ? err.message : String(err) });
+  }
+
+  return { checks, allOk: checks.every((c) => c.ok) };
+}
+```
+
+- [ ] **Step 4: Run test, verify pass**
+
+Run: `pnpm --filter @work-summary/cli test doctor`
+
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add apps/cli
+git commit -m "feat(cli): doctor command (config, github, smtp, storage checks)"
+```
+
+---
+
+### Task 25: `cli` - `scan` command + commander wiring
+
+**Files:**
+- Create: `apps/cli/src/commands/scan.ts`
+- Create: `apps/cli/src/bin.ts`
+- Create: `apps/cli/src/index.ts`
+- Create: `apps/cli/src/exit-codes.ts`
+- Test: `apps/cli/src/commands/scan.test.ts`
+
+**Interfaces:**
+- Consumes: everything from previous tasks.
+- Produces:
+  - `runScan(args: { config: Config; deps: ScanDeps; dryRun: boolean; now: () => Date }): Promise<{ exitCode: number; newComments: number }>`
+  - `interface ScanDeps { source: Source; notifier: Notifier; db: SqliteDatabase; logger: Logger; }`
+  - `exit-codes.ts` exports `EXIT = { OK: 0, UNEXPECTED: 1, CONFIG: 2, AUTH: 3, SMTP: 4, STORAGE: 5, DRY_RUN_WOULD_SEND: 10 }`.
+  - `bin.ts` is the commander entry: subcommands `init`, `doctor`, `scan` (default).
+
+- [ ] **Step 1: Write exit codes**
+
+Create `apps/cli/src/exit-codes.ts`:
+
+```ts
+export const EXIT = {
+  OK: 0,
+  UNEXPECTED: 1,
+  CONFIG: 2,
+  AUTH: 3,
+  SMTP: 4,
+  STORAGE: 5,
+  DRY_RUN_WOULD_SEND: 10,
+} as const;
+```
+
+- [ ] **Step 2: Write failing test for scan pipeline**
+
+Create `apps/cli/src/commands/scan.test.ts`:
+
+```ts
+import { describe, it, expect } from 'vitest';
+import { runScan } from './scan.js';
+import { openDatabase, runMigrations, createCommentsRepo, createRunsRepo, createWatermarksRepo } from '@work-summary/storage';
+import pino from 'pino';
+import type { PendingComment } from '@work-summary/core';
+import type { Config } from '../config.js';
+
+function sampleComment(id: string): PendingComment {
+  return {
+    id, source: 'github', repo: 'org/r', containerType: 'pr', containerNumber: 1,
+    containerTitle: '', containerUrl: '', commentId: id, commentUrl: '',
+    author: { login: 'a', isBot: false }, body: '', createdAt: '2026-06-01T00:00:00Z',
+    matchedRules: ['mentioned'],
+  };
+}
+
+function baseConfig(): Config {
+  return {
+    user: { githubLogin: 'me' },
+    sources: {
+      github: {
+        token: 't', repos: ['org/r'],
+        rules: { authorOfPrUnanswered: true, mentioned: true, repliedBeforeThenFollowup: true, assignee: true, changesRequested: true },
+        filters: { excludeBots: false, botWhitelist: [] },
+      },
+    },
+    scan: { lookbackDays: 7, concurrency: 1 },
+    notifications: [{
+      id: 'n', type: 'smtp', enabled: true,
+      smtp: { host: 'h', port: 25, secure: false, user: '', pass: '' },
+      from: 'a', to: 'b', subjectTemplate: '[ws] {{count}} - {{date}}',
+    }],
+    logging: { level: 'silent' as never, file: '/tmp/x.log' },
+  };
+}
+
+function makeDeps(comments: PendingComment[], sendImpl: (c: PendingComment[]) => Promise<void> = async () => undefined) {
+  const db = openDatabase(':memory:');
+  runMigrations(db);
+  return {
+    db,
+    commentsRepo: createCommentsRepo(db),
+    runsRepo: createRunsRepo(db, () => new Date('2026-06-01T00:00:00Z')),
+    watermarksRepo: createWatermarksRepo(db),
+    source: { id: 'github' as const, fetchPendingComments: () => Promise.resolve(comments) },
+    notifier: { id: 'smtp', send: async (p: { comments: PendingComment[] }) => sendImpl(p.comments) },
+    logger: pino({ level: 'silent' }),
+  };
+}
+
+describe('runScan', () => {
+  it('sends and marks notified on first run', async () => {
+    const deps = makeDeps([sampleComment('a'), sampleComment('b')]);
+    const r = await runScan({ config: baseConfig(), deps, dryRun: false, now: () => new Date('2026-06-01T00:00:00Z') });
+    expect(r.exitCode).toBe(0);
+    expect(r.newComments).toBe(2);
+    expect(deps.commentsRepo.filterUnnotified([sampleComment('a'), sampleComment('b')])).toEqual([]);
+  });
+
+  it('exits 0 with 0 new when nothing matches', async () => {
+    const deps = makeDeps([]);
+    const r = await runScan({ config: baseConfig(), deps, dryRun: false, now: () => new Date('2026-06-01T00:00:00Z') });
+    expect(r.exitCode).toBe(0);
+    expect(r.newComments).toBe(0);
+  });
+
+  it('dedups: second run with same comments sends nothing', async () => {
+    const cfg = baseConfig();
+    const deps1 = makeDeps([sampleComment('a')]);
+    await runScan({ config: cfg, deps: deps1, dryRun: false, now: () => new Date('2026-06-01T00:00:00Z') });
+
+    let sent = 0;
+    const deps2 = {
+      ...deps1,
+      source: { id: 'github' as const, fetchPendingComments: () => Promise.resolve([sampleComment('a')]) },
+      notifier: { id: 'smtp', send: async () => { sent++; } },
+    };
+    const r = await runScan({ config: cfg, deps: deps2, dryRun: false, now: () => new Date('2026-06-02T00:00:00Z') });
+    expect(r.exitCode).toBe(0);
+    expect(r.newComments).toBe(0);
+    expect(sent).toBe(0);
+  });
+
+  it('exits 10 on dry-run and does NOT mark notified', async () => {
+    const deps = makeDeps([sampleComment('a')]);
+    const r = await runScan({ config: baseConfig(), deps, dryRun: true, now: () => new Date('2026-06-01T00:00:00Z') });
+    expect(r.exitCode).toBe(10);
+    expect(deps.commentsRepo.filterUnnotified([sampleComment('a')])).toHaveLength(1);
+  });
+
+  it('exits 4 on SMTP failure and does NOT mark notified', async () => {
+    const deps = makeDeps([sampleComment('a')], () => Promise.reject(Object.assign(new Error('refused'), { name: 'SmtpError' })));
+    const r = await runScan({ config: baseConfig(), deps, dryRun: false, now: () => new Date('2026-06-01T00:00:00Z') });
+    expect(r.exitCode).toBe(4);
+    expect(deps.commentsRepo.filterUnnotified([sampleComment('a')])).toHaveLength(1);
+  });
+});
+```
+
+- [ ] **Step 3: Run test, verify failure**
+
+Run: `pnpm --filter @work-summary/cli test scan`
+
+Expected: FAIL.
+
+- [ ] **Step 4: Implement runScan**
+
+Create `apps/cli/src/commands/scan.ts`:
+
+```ts
+import type { Logger } from 'pino';
+import type { PendingComment } from '@work-summary/core';
+import type { Source } from '@work-summary/github-source';
+import type { Notifier, NotificationPayload } from '@work-summary/notifiers';
+import type { CommentsRepo, RunsRepo, WatermarksRepo, SqliteDatabase } from '@work-summary/storage';
+import type { Config } from '../config.js';
+import { EXIT } from '../exit-codes.js';
+
+export interface ScanDeps {
+  db: SqliteDatabase;
+  commentsRepo: CommentsRepo;
+  runsRepo: RunsRepo;
+  watermarksRepo: WatermarksRepo;
+  source: Source;
+  notifier: Notifier;
+  logger: Logger;
+}
+
+function renderSubject(template: string, count: number, date: Date): string {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  return template.replace(/\{\{count\}\}/g, String(count)).replace(/\{\{date\}\}/g, `${yyyy}-${mm}-${dd}`);
+}
+
+function isSmtpError(err: unknown): boolean {
+  return err instanceof Error && err.name === 'SmtpError';
+}
+
+export interface RunScanArgs {
+  config: Config;
+  deps: ScanDeps;
+  dryRun: boolean;
+  now: () => Date;
+}
+
+export async function runScan(args: RunScanArgs): Promise<{ exitCode: number; newComments: number }> {
+  const { config, deps, dryRun, now } = args;
+  const runId = deps.runsRepo.startRun();
+  const log = deps.logger.child({ runId });
+
+  const lookbackMs = config.scan.lookbackDays * 24 * 60 * 60 * 1000;
+  const defaultSince = new Date(now().getTime() - lookbackMs).toISOString();
+  const sinceByRepo: Record<string, string | undefined> = {};
+  for (const repo of config.sources.github.repos) {
+    const wm = deps.watermarksRepo.get('github', repo);
+    if (wm) sinceByRepo[repo] = wm;
+  }
+
+  let fetched: PendingComment[];
+  try {
+    fetched = await deps.source.fetchPendingComments({
+      repos: config.sources.github.repos,
+      userLogin: config.user.githubLogin,
+      sinceByRepo,
+      defaultSince,
+      rules: config.sources.github.rules,
+      filters: config.sources.github.filters,
+      concurrency: config.scan.concurrency,
+    });
+  } catch (err) {
+    deps.runsRepo.finishRun(runId, 'failed', {
+      commentsFound: 0, commentsNotified: 0,
+      errorMessage: err instanceof Error ? err.message : String(err),
+    });
+    log.error({ err }, 'Source fetch failed');
+    return { exitCode: EXIT.UNEXPECTED, newComments: 0 };
+  }
+
+  const newComments = deps.commentsRepo.filterUnnotified(fetched);
+
+  if (newComments.length === 0) {
+    deps.runsRepo.finishRun(runId, 'success', { commentsFound: fetched.length, commentsNotified: 0 });
+    for (const repo of config.sources.github.repos) deps.watermarksRepo.set('github', repo, now().toISOString());
+    log.info({ found: fetched.length }, 'No new comments');
+    return { exitCode: EXIT.OK, newComments: 0 };
+  }
+
+  const notif = config.notifications.find((n) => n.enabled);
+  if (!notif) {
+    deps.runsRepo.finishRun(runId, 'failed', { commentsFound: fetched.length, commentsNotified: 0, errorMessage: 'No enabled notifier' });
+    return { exitCode: EXIT.CONFIG, newComments: newComments.length };
+  }
+
+  const payload: NotificationPayload = {
+    subject: renderSubject(notif.subjectTemplate, newComments.length, now()),
+    comments: newComments,
+    generatedAt: now().toISOString(),
+  };
+
+  if (dryRun) {
+    deps.runsRepo.finishRun(runId, 'success', { commentsFound: fetched.length, commentsNotified: 0 });
+    log.info({ would: newComments.length }, 'Dry-run');
+    return { exitCode: EXIT.DRY_RUN_WOULD_SEND, newComments: newComments.length };
+  }
+
+  try {
+    await deps.notifier.send(payload);
+  } catch (err) {
+    deps.runsRepo.finishRun(runId, 'failed', {
+      commentsFound: fetched.length, commentsNotified: 0,
+      errorMessage: err instanceof Error ? err.message : String(err),
+    });
+    log.error({ err }, 'Notifier send failed');
+    return { exitCode: isSmtpError(err) ? EXIT.SMTP : EXIT.UNEXPECTED, newComments: newComments.length };
+  }
+
+  try {
+    deps.commentsRepo.markAsNotified(newComments, now().toISOString());
+    for (const repo of config.sources.github.repos) deps.watermarksRepo.set('github', repo, now().toISOString());
+  } catch (err) {
+    deps.runsRepo.finishRun(runId, 'partial', {
+      commentsFound: fetched.length, commentsNotified: newComments.length,
+      errorMessage: 'Storage failure after send',
+    });
+    log.error({ err }, 'Storage write failed after send');
+    return { exitCode: EXIT.STORAGE, newComments: newComments.length };
+  }
+
+  deps.runsRepo.finishRun(runId, 'success', {
+    commentsFound: fetched.length,
+    commentsNotified: newComments.length,
+  });
+  log.info({ sent: newComments.length }, 'Digest sent');
+  return { exitCode: EXIT.OK, newComments: newComments.length };
+}
+```
+
+- [ ] **Step 5: Run test, verify pass**
+
+Run: `pnpm --filter @work-summary/cli test scan`
+
+Expected: PASS, 5 tests.
+
+- [ ] **Step 6: Wire commander entry**
+
+Create `apps/cli/src/bin.ts`:
+
+```ts
+#!/usr/bin/env node
+import { Command } from 'commander';
+import { runInit } from './commands/init.js';
+import { runDoctor } from './commands/doctor.js';
+import { runScan } from './commands/scan.js';
+import { loadConfig, ConfigError } from './config.js';
+import { createLogger } from './logger.js';
+import { defaultConfigPath, defaultStateDir, defaultDbPath } from './paths.js';
+import { createOctokit } from '@work-summary/github-source';
+import { GithubSource } from '@work-summary/github-source';
+import { SmtpNotifier } from '@work-summary/notifiers';
+import { openDatabase, runMigrations, createCommentsRepo, createRunsRepo, createWatermarksRepo } from '@work-summary/storage';
+import { EXIT } from './exit-codes.js';
+
+const program = new Command();
+program.name('work-summary').description('Centralize pending PR/issue comments awaiting your response').version('0.1.0');
+
+program
+  .command('init')
+  .option('-c, --config <path>', 'config path', defaultConfigPath())
+  .option('--force', 'overwrite existing config', false)
+  .action((opts: { config: string; force: boolean }) => {
+    try {
+      const r = runInit({ configPath: opts.config, stateDir: defaultStateDir(), force: opts.force });
+      process.stdout.write(`OK Wrote config to ${r.configPath}\nOK Created state dir at ${r.stateDir}\n`);
+      process.exit(EXIT.OK);
+    } catch (err) {
+      process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.exit(EXIT.UNEXPECTED);
+    }
+  });
+
+program
+  .command('doctor')
+  .option('-c, --config <path>', 'config path', defaultConfigPath())
+  .action(async (opts: { config: string }) => {
+    try {
+      const cfg = loadConfig(opts.config, process.env);
+      const r = await runDoctor({
+        config: cfg,
+        deps: {
+          makeOctokit: (token) => createOctokit({ token }),
+          makeSmtp: (smtpOpts) => new SmtpNotifier(smtpOpts),
+          openDb: (p) => openDatabase(p),
+          dbPath: defaultDbPath(),
+        },
+      });
+      for (const c of r.checks) process.stdout.write(`${c.ok ? 'OK' : 'FAIL'} ${c.name}${c.message ? ': ' + c.message : ''}\n`);
+      process.exit(r.allOk ? EXIT.OK : EXIT.AUTH);
+    } catch (err) {
+      if (err instanceof ConfigError) {
+        process.stderr.write(`config error: ${err.message}\n`);
+        process.exit(EXIT.CONFIG);
+      }
+      process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.exit(EXIT.UNEXPECTED);
+    }
+  });
+
+program
+  .command('scan', { isDefault: true })
+  .option('-c, --config <path>', 'config path', defaultConfigPath())
+  .option('--dry-run', 'do not send or mark notified', false)
+  .option('--json', 'log JSON only (no pretty)', false)
+  .option('--debug', 'verbose debug logging', false)
+  .action(async (opts: { config: string; dryRun: boolean; json: boolean; debug: boolean }) => {
+    try {
+      const cfg = loadConfig(opts.config, process.env);
+      const logger = createLogger({
+        level: opts.debug ? 'debug' : cfg.logging.level,
+        file: cfg.logging.file,
+        jsonOnly: opts.json,
+      });
+      const db = openDatabase(defaultDbPath());
+      runMigrations(db);
+      const client = createOctokit({ token: cfg.sources.github.token });
+      const source = new GithubSource(client);
+      const notif = cfg.notifications.find((n) => n.enabled);
+      if (!notif) {
+        process.stderr.write('No enabled notifier in config\n');
+        process.exit(EXIT.CONFIG);
+      }
+      const notifier = new SmtpNotifier({ ...notif.smtp, from: notif.from, to: notif.to });
+      const r = await runScan({
+        config: cfg,
+        deps: {
+          db,
+          commentsRepo: createCommentsRepo(db),
+          runsRepo: createRunsRepo(db, () => new Date()),
+          watermarksRepo: createWatermarksRepo(db),
+          source,
+          notifier,
+          logger,
+        },
+        dryRun: opts.dryRun,
+        now: () => new Date(),
+      });
+      process.exit(r.exitCode);
+    } catch (err) {
+      if (err instanceof ConfigError) {
+        process.stderr.write(`config error: ${err.message}\n`);
+        process.exit(EXIT.CONFIG);
+      }
+      process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.exit(EXIT.UNEXPECTED);
+    }
+  });
+
+program.parseAsync(process.argv).catch((err: unknown) => {
+  process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
+  process.exit(EXIT.UNEXPECTED);
+});
+```
+
+Create `apps/cli/src/index.ts`:
+
+```ts
+export { runInit } from './commands/init.js';
+export { runDoctor } from './commands/doctor.js';
+export { runScan } from './commands/scan.js';
+export { loadConfig, ConfigError } from './config.js';
+export { createLogger } from './logger.js';
+export { EXIT } from './exit-codes.js';
+```
+
+- [ ] **Step 7: Verify everything builds**
+
+Run: `pnpm -r build && pnpm -r test`
+
+Expected: PASS, all packages and all tests.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add apps/cli
+git commit -m "feat(cli): scan command + commander wiring (init/doctor/scan)"
+```
+
+---
+
+### Task 26: README and cron setup docs
+
+**Files:**
+- Modify: `README.md`
+
+**Interfaces:**
+- Consumes: nothing.
+- Produces: user-facing installation, configuration, and cron-setup documentation.
+
+- [ ] **Step 1: Write README**
+
+Replace `README.md` with:
+
+````markdown
+# work-summary
+
+Centralize all your pending GitHub PR/issue comments in one daily email digest. Phase 1: CLI + SMTP.
+
+## Install
+
+```bash
+# clone
+git clone https://github.com/jpaulodev/work-summary.git
+cd work-summary
+
+# install + build
+pnpm install
+pnpm build
+
+# link the CLI globally (optional)
+cd apps/cli && pnpm link --global
+```
+
+Requires Node.js 20+.
+
+## Quick start
+
+```bash
+# 1. Bootstrap config
+work-summary init
+
+# 2. Set required env vars
+export GITHUB_TOKEN=ghp_xxxx          # repo + read:user scopes
+export SMTP_USER=me@example.com
+export SMTP_PASS=app-password
+
+# 3. Edit ~/.config/work-summary/config.yaml: list your repos
+
+# 4. Verify everything works
+work-summary doctor
+
+# 5. Run a scan
+work-summary scan
+```
+
+## Commands
+
+- `work-summary init` - write a starter config to `~/.config/work-summary/config.yaml`.
+- `work-summary doctor` - validate config, ping GitHub, verify SMTP, open the state DB.
+- `work-summary scan` - fetch pending comments and email a digest (default command).
+  - `--dry-run` - compute and report but neither send nor mark notified (exits 10).
+  - `--json` - JSON-only logs (recommended for cron).
+  - `--debug` - verbose debug logging.
+
+## Matching rules
+
+Toggle each in config under `sources.github.rules`:
+
+| Key | Description |
+|---|---|
+| `authorOfPrUnanswered` | A comment from someone else on a PR I authored, with no reply from me since |
+| `mentioned` | A comment that @-mentions my login (word boundary, case insensitive) |
+| `repliedBeforeThenFollowup` | I commented earlier in the thread; someone followed up after my last comment |
+| `assignee` | I am an assignee on the PR/issue and a comment has no reply from me since |
+| `changesRequested` | A reviewer left a CHANGES_REQUESTED review on my PR; I have not pushed a commit or replied |
+
+## Scheduling with cron
+
+```bash
+crontab -e
+```
+
+Add a line such as:
+
+```
+# 8am, 12pm, 5pm on weekdays
+0 8,12,17 * * 1-5  /usr/local/bin/work-summary scan --json >> ~/.local/state/work-summary/cron.log 2>&1
+```
+
+For macOS, prefer `launchd` (see `man launchd.plist`).
+
+## Exit codes
+
+| Code | Meaning |
+|---:|---|
+| 0 | Success (digest sent or nothing new) |
+| 1 | Unexpected error |
+| 2 | Invalid config |
+| 3 | GitHub auth failure |
+| 4 | SMTP failure |
+| 5 | Storage IO failure |
+| 10 | Dry-run would-send |
+
+## Troubleshooting
+
+- **`config error: Unresolved environment variables: GITHUB_TOKEN`** - export the missing var before running.
+- **`SmtpError: connect ECONNREFUSED`** - check host/port and that your network allows outbound SMTP.
+- **`401 Unauthorized` from GitHub** - regenerate `GITHUB_TOKEN` with `repo` and `read:user` scopes.
+- **Emails arriving repeatedly** - the dedup table is per state DB. Do not delete `~/.local/state/work-summary/state.db` unless you want to replay.
+- **No comments matched but you expected some** - check that the repo is listed in `sources.github.repos` and that at least one rule is enabled.
+
+## Architecture
+
+See [`docs/superpowers/specs/2026-06-29-phase1-core-scanner-design.md`](docs/superpowers/specs/2026-06-29-phase1-core-scanner-design.md) for the full design.
+
+```
+apps/cli  ->  github-source ->  core
+   |      ->  notifiers     ->  core
+   |      ->  storage       ->  core
+   `->  core
+```
+
+## Roadmap
+
+Phase 2: Web UI + REST API + auth + dashboard.
+Phase 3: built-in scheduler (replaces cron).
+Phase 4: JIRA source.
+Phase 5: Slack and Teams notifiers.
+Phase 6: reply to comments from the dashboard.
+
+Each phase has its own GitHub epic - see issues labeled `epic`.
+
+## License
+
+MIT.
+````
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add README.md
+git commit -m "docs: README with install, commands, scheduling, troubleshooting"
+```
+
+- [ ] **Step 3: Final integration check**
+
+Run:
+
+```bash
+pnpm -r build
+pnpm -r test
+pnpm -r lint
+```
+
+Expected: every command exits 0. Push the branch:
+
+```bash
+git push origin main
+```
+
+---
+
+## Self-Review Checklist
+
+After implementing, verify:
+
+- **Spec coverage:** Every requirement from `docs/superpowers/specs/2026-06-29-phase1-core-scanner-design.md` sections 1-14 has a task. Sections 15 (epics) and 16 (open questions) are out of scope for the plan.
+- **Exit codes match spec section 9:** 0, 1, 2, 3, 4, 5, 10 - covered by `EXIT` in Task 25.
+- **No em-dashes anywhere** in the plan or generated code/text - use hyphens (-).
+- **Type names consistent across tasks:** `PendingComment`, `RawComment`, `RawContainer`, `RawReview`, `ScanContext`, `MatchRulesConfig`, `BotFilterConfig`, `NotificationPayload`, `Notifier`, `Source`, `FetchOptions`, `CommentsRepo`, `RunsRepo`, `WatermarksRepo`, `SqliteDatabase`, `Config`, `ConfigError`, `SmtpError`, `EXIT`.
+- **Atomic ordering:** `send()` precedes `markAsNotified()` and watermark updates in Task 25 - confirmed.
+- **Bot filter** integrated in Task 8 before `GithubSource` consumes it in Task 20 - order correct.
+- **No placeholders:** no `TBD`, `TODO`, `similar to Task N`, or "add error handling" - confirmed.
+
+
 
 
 
