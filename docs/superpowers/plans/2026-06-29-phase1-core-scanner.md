@@ -1518,3 +1518,678 @@ git commit -m "feat(core): bot filter (excludeBots + botWhitelist)"
 
 ---
 
+### Task 9: `storage` - DB init and migration 0001
+
+**Files:**
+- Create: `packages/storage/package.json`
+- Create: `packages/storage/tsconfig.json`
+- Create: `packages/storage/migrations/0001_init.sql`
+- Create: `packages/storage/src/index.ts`
+- Create: `packages/storage/src/db.ts`
+- Create: `packages/storage/src/migrate.ts`
+- Test: `packages/storage/src/migrate.test.ts`
+
+**Interfaces:**
+- Consumes: nothing (depends only on better-sqlite3).
+- Produces:
+  - `openDatabase(path: string): Database` - returns a `better-sqlite3` Database with WAL enabled and `foreign_keys = ON`. `path` may be `:memory:`.
+  - `runMigrations(db: Database): { applied: number[] }` - applies any migration whose version > current `schema_version`. Idempotent.
+
+- [ ] **Step 1: Create package skeleton**
+
+Create `packages/storage/package.json`:
+
+```json
+{
+  "name": "@work-summary/storage",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" } },
+  "engines": { "node": ">=20.0.0" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && cp -r migrations dist/migrations",
+    "test": "vitest run",
+    "lint": "eslint src",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@work-summary/core": "workspace:*",
+    "better-sqlite3": "^11.3.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.5"
+  }
+}
+```
+
+Create `packages/storage/tsconfig.json`:
+
+```json
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "rootDir": "src", "outDir": "dist" },
+  "include": ["src/**/*"]
+}
+```
+
+- [ ] **Step 2: Write migration 0001**
+
+Create `packages/storage/migrations/0001_init.sql`:
+
+```sql
+CREATE TABLE schema_version (
+  version INTEGER PRIMARY KEY,
+  applied_at TEXT NOT NULL
+);
+
+CREATE TABLE notified_comments (
+  id TEXT PRIMARY KEY,
+  source TEXT NOT NULL,
+  repo TEXT NOT NULL,
+  container_type TEXT NOT NULL,
+  container_number INTEGER NOT NULL,
+  comment_native_id TEXT NOT NULL,
+  author_login TEXT NOT NULL,
+  matched_rules TEXT NOT NULL,
+  notified_at TEXT NOT NULL
+);
+CREATE INDEX idx_notified_repo ON notified_comments(repo);
+CREATE INDEX idx_notified_at ON notified_comments(notified_at);
+
+CREATE TABLE runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  started_at TEXT NOT NULL,
+  finished_at TEXT,
+  status TEXT NOT NULL,
+  comments_found INTEGER DEFAULT 0,
+  comments_notified INTEGER DEFAULT 0,
+  error_message TEXT,
+  source_stats TEXT
+);
+CREATE INDEX idx_runs_started ON runs(started_at);
+
+CREATE TABLE source_watermarks (
+  source TEXT NOT NULL,
+  repo TEXT NOT NULL,
+  last_success_at TEXT NOT NULL,
+  PRIMARY KEY (source, repo)
+);
+```
+
+- [ ] **Step 3: Write failing migration test**
+
+Create `packages/storage/src/migrate.test.ts`:
+
+```ts
+import { describe, it, expect } from 'vitest';
+import { openDatabase } from './db.js';
+import { runMigrations } from './migrate.js';
+
+describe('runMigrations', () => {
+  it('applies 0001 on a fresh in-memory DB', () => {
+    const db = openDatabase(':memory:');
+    const result = runMigrations(db);
+    expect(result.applied).toEqual([1]);
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as { name: string }[];
+    const names = tables.map((t) => t.name);
+    expect(names).toContain('notified_comments');
+    expect(names).toContain('runs');
+    expect(names).toContain('source_watermarks');
+    expect(names).toContain('schema_version');
+  });
+
+  it('is idempotent on second run', () => {
+    const db = openDatabase(':memory:');
+    runMigrations(db);
+    const second = runMigrations(db);
+    expect(second.applied).toEqual([]);
+  });
+
+  it('records applied version in schema_version', () => {
+    const db = openDatabase(':memory:');
+    runMigrations(db);
+    const rows = db.prepare('SELECT version FROM schema_version').all() as { version: number }[];
+    expect(rows.map((r) => r.version)).toEqual([1]);
+  });
+});
+```
+
+- [ ] **Step 4: Run test, verify failure**
+
+Run: `pnpm --filter @work-summary/storage test`
+
+Expected: FAIL with module-not-found.
+
+- [ ] **Step 5: Implement db + migrate**
+
+Create `packages/storage/src/db.ts`:
+
+```ts
+import Database from 'better-sqlite3';
+import type { Database as DB } from 'better-sqlite3';
+
+export type SqliteDatabase = DB;
+
+export function openDatabase(path: string): SqliteDatabase {
+  const db = new Database(path);
+  db.pragma('journal_mode = WAL');
+  db.pragma('foreign_keys = ON');
+  return db;
+}
+```
+
+Create `packages/storage/src/migrate.ts`:
+
+```ts
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import type { SqliteDatabase } from './db.js';
+
+function migrationsDir(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const candidates = [join(here, '..', 'migrations'), join(here, '..', '..', 'migrations')];
+  for (const c of candidates) if (existsSync(c)) return c;
+  throw new Error(`Migrations directory not found near ${here}`);
+}
+
+interface Migration {
+  version: number;
+  name: string;
+  sql: string;
+}
+
+function loadMigrations(): Migration[] {
+  const dir = migrationsDir();
+  return readdirSync(dir)
+    .filter((f) => f.endsWith('.sql'))
+    .sort()
+    .map((f) => {
+      const match = /^(\d+)_(.+)\.sql$/.exec(f);
+      if (!match) throw new Error(`Bad migration filename: ${f}`);
+      return {
+        version: parseInt(match[1]!, 10),
+        name: match[2]!,
+        sql: readFileSync(join(dir, f), 'utf8'),
+      };
+    });
+}
+
+function ensureVersionTable(db: SqliteDatabase): void {
+  db.exec(`CREATE TABLE IF NOT EXISTS schema_version (
+    version INTEGER PRIMARY KEY,
+    applied_at TEXT NOT NULL
+  )`);
+}
+
+function appliedVersions(db: SqliteDatabase): Set<number> {
+  const rows = db.prepare('SELECT version FROM schema_version').all() as { version: number }[];
+  return new Set(rows.map((r) => r.version));
+}
+
+export function runMigrations(db: SqliteDatabase): { applied: number[] } {
+  ensureVersionTable(db);
+  const already = appliedVersions(db);
+  const all = loadMigrations();
+  const applied: number[] = [];
+  for (const m of all) {
+    if (already.has(m.version)) continue;
+    const tx = db.transaction(() => {
+      db.exec(m.sql);
+      db.prepare('INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (?, ?)').run(
+        m.version,
+        new Date().toISOString(),
+      );
+    });
+    tx();
+    applied.push(m.version);
+  }
+  return { applied };
+}
+```
+
+Create `packages/storage/src/index.ts`:
+
+```ts
+export { openDatabase } from './db.js';
+export type { SqliteDatabase } from './db.js';
+export { runMigrations } from './migrate.js';
+```
+
+- [ ] **Step 6: Run test, verify pass**
+
+Run: `pnpm --filter @work-summary/storage test`
+
+Expected: PASS, 3 tests.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add packages/storage
+git commit -m "feat(storage): DB init with WAL and migration 0001"
+```
+
+---
+
+### Task 10: `storage` - commentsRepo
+
+**Files:**
+- Create: `packages/storage/src/comments-repo.ts`
+- Test: `packages/storage/src/comments-repo.test.ts`
+- Modify: `packages/storage/src/index.ts`
+
+**Interfaces:**
+- Consumes: `SqliteDatabase` from Task 9, `PendingComment` from `@work-summary/core`.
+- Produces:
+  - `createCommentsRepo(db: SqliteDatabase): CommentsRepo`
+  - `CommentsRepo.filterUnnotified(comments: PendingComment[]): PendingComment[]`
+  - `CommentsRepo.markAsNotified(comments: PendingComment[], notifiedAt: string): void`
+
+- [ ] **Step 1: Write failing test**
+
+Create `packages/storage/src/comments-repo.test.ts`:
+
+```ts
+import { describe, it, expect, beforeEach } from 'vitest';
+import { openDatabase, runMigrations } from './index.js';
+import { createCommentsRepo } from './comments-repo.js';
+import type { PendingComment } from '@work-summary/core';
+import type { SqliteDatabase } from './db.js';
+
+function mkComment(id: string): PendingComment {
+  return {
+    id,
+    source: 'github',
+    repo: 'org/r',
+    containerType: 'pr',
+    containerNumber: 1,
+    containerTitle: '',
+    containerUrl: '',
+    commentId: id,
+    commentUrl: '',
+    author: { login: 'alice', isBot: false },
+    body: 'hi',
+    createdAt: '2026-06-01T00:00:00Z',
+    matchedRules: ['mentioned'],
+  };
+}
+
+let db: SqliteDatabase;
+beforeEach(() => {
+  db = openDatabase(':memory:');
+  runMigrations(db);
+});
+
+describe('commentsRepo', () => {
+  it('filterUnnotified returns all when DB empty', () => {
+    const repo = createCommentsRepo(db);
+    const input = [mkComment('a'), mkComment('b')];
+    expect(repo.filterUnnotified(input).map((c) => c.id).sort()).toEqual(['a', 'b']);
+  });
+
+  it('markAsNotified persists ids, filterUnnotified skips them', () => {
+    const repo = createCommentsRepo(db);
+    repo.markAsNotified([mkComment('a')], '2026-06-01T00:00:00Z');
+    const input = [mkComment('a'), mkComment('b')];
+    expect(repo.filterUnnotified(input).map((c) => c.id)).toEqual(['b']);
+  });
+
+  it('markAsNotified is idempotent (re-marking same id does not throw)', () => {
+    const repo = createCommentsRepo(db);
+    repo.markAsNotified([mkComment('a')], '2026-06-01T00:00:00Z');
+    repo.markAsNotified([mkComment('a')], '2026-06-02T00:00:00Z');
+    const input = [mkComment('a')];
+    expect(repo.filterUnnotified(input)).toEqual([]);
+  });
+
+  it('handles empty input arrays', () => {
+    const repo = createCommentsRepo(db);
+    expect(repo.filterUnnotified([])).toEqual([]);
+    expect(() => repo.markAsNotified([], '2026-06-01T00:00:00Z')).not.toThrow();
+  });
+});
+```
+
+- [ ] **Step 2: Run test, verify failure**
+
+Run: `pnpm --filter @work-summary/storage test comments-repo`
+
+Expected: FAIL (module not found).
+
+- [ ] **Step 3: Implement repo**
+
+Create `packages/storage/src/comments-repo.ts`:
+
+```ts
+import type { PendingComment } from '@work-summary/core';
+import type { SqliteDatabase } from './db.js';
+
+export interface CommentsRepo {
+  filterUnnotified(comments: PendingComment[]): PendingComment[];
+  markAsNotified(comments: PendingComment[], notifiedAt: string): void;
+}
+
+export function createCommentsRepo(db: SqliteDatabase): CommentsRepo {
+  const hasStmt = db.prepare('SELECT 1 FROM notified_comments WHERE id = ?');
+  const insertStmt = db.prepare(
+    `INSERT OR REPLACE INTO notified_comments
+     (id, source, repo, container_type, container_number, comment_native_id, author_login, matched_rules, notified_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  return {
+    filterUnnotified(comments) {
+      if (comments.length === 0) return [];
+      return comments.filter((c) => hasStmt.get(c.id) === undefined);
+    },
+    markAsNotified(comments, notifiedAt) {
+      if (comments.length === 0) return;
+      const tx = db.transaction((items: PendingComment[]) => {
+        for (const c of items) {
+          insertStmt.run(
+            c.id,
+            c.source,
+            c.repo,
+            c.containerType,
+            c.containerNumber,
+            c.commentId,
+            c.author.login,
+            JSON.stringify(c.matchedRules),
+            notifiedAt,
+          );
+        }
+      });
+      tx(comments);
+    },
+  };
+}
+```
+
+Update `packages/storage/src/index.ts`:
+
+```ts
+export { openDatabase } from './db.js';
+export type { SqliteDatabase } from './db.js';
+export { runMigrations } from './migrate.js';
+export { createCommentsRepo } from './comments-repo.js';
+export type { CommentsRepo } from './comments-repo.js';
+```
+
+- [ ] **Step 4: Run test, verify pass**
+
+Run: `pnpm --filter @work-summary/storage test`
+
+Expected: PASS, all tests including comments-repo.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/storage
+git commit -m "feat(storage): commentsRepo (filterUnnotified, markAsNotified)"
+```
+
+---
+
+### Task 11: `storage` - runsRepo
+
+**Files:**
+- Create: `packages/storage/src/runs-repo.ts`
+- Test: `packages/storage/src/runs-repo.test.ts`
+- Modify: `packages/storage/src/index.ts`
+
+**Interfaces:**
+- Consumes: `SqliteDatabase` from Task 9.
+- Produces:
+  - `createRunsRepo(db, now: () => Date): RunsRepo`
+  - `RunsRepo.startRun(): number` - inserts a row, returns `runs.id`.
+  - `RunsRepo.finishRun(id, status: 'success' | 'partial' | 'failed', stats: RunStats): void`
+  - `interface RunStats { commentsFound: number; commentsNotified: number; errorMessage?: string; sourceStats?: Record<string, { fetched: number; matched: number }>; }`
+
+- [ ] **Step 1: Write failing test**
+
+Create `packages/storage/src/runs-repo.test.ts`:
+
+```ts
+import { describe, it, expect, beforeEach } from 'vitest';
+import { openDatabase, runMigrations } from './index.js';
+import { createRunsRepo } from './runs-repo.js';
+import type { SqliteDatabase } from './db.js';
+
+let db: SqliteDatabase;
+beforeEach(() => {
+  db = openDatabase(':memory:');
+  runMigrations(db);
+});
+
+describe('runsRepo', () => {
+  it('startRun returns incrementing ids', () => {
+    const repo = createRunsRepo(db, () => new Date('2026-06-01T00:00:00Z'));
+    expect(repo.startRun()).toBe(1);
+    expect(repo.startRun()).toBe(2);
+  });
+
+  it('finishRun updates status and stats', () => {
+    const repo = createRunsRepo(db, () => new Date('2026-06-01T00:00:00Z'));
+    const id = repo.startRun();
+    repo.finishRun(id, 'success', {
+      commentsFound: 7,
+      commentsNotified: 3,
+      sourceStats: { 'org/r': { fetched: 12, matched: 7 } },
+    });
+    const row = db.prepare('SELECT * FROM runs WHERE id = ?').get(id) as Record<string, unknown>;
+    expect(row.status).toBe('success');
+    expect(row.comments_found).toBe(7);
+    expect(row.comments_notified).toBe(3);
+    expect(JSON.parse(String(row.source_stats))).toEqual({ 'org/r': { fetched: 12, matched: 7 } });
+    expect(row.finished_at).not.toBeNull();
+  });
+
+  it('finishRun records error message on failed', () => {
+    const repo = createRunsRepo(db, () => new Date('2026-06-01T00:00:00Z'));
+    const id = repo.startRun();
+    repo.finishRun(id, 'failed', { commentsFound: 0, commentsNotified: 0, errorMessage: 'boom' });
+    const row = db.prepare('SELECT error_message FROM runs WHERE id = ?').get(id) as { error_message: string };
+    expect(row.error_message).toBe('boom');
+  });
+});
+```
+
+- [ ] **Step 2: Run test, verify failure**
+
+Run: `pnpm --filter @work-summary/storage test runs-repo`
+
+Expected: FAIL.
+
+- [ ] **Step 3: Implement repo**
+
+Create `packages/storage/src/runs-repo.ts`:
+
+```ts
+import type { SqliteDatabase } from './db.js';
+
+export interface RunStats {
+  commentsFound: number;
+  commentsNotified: number;
+  errorMessage?: string;
+  sourceStats?: Record<string, { fetched: number; matched: number }>;
+}
+
+export interface RunsRepo {
+  startRun(): number;
+  finishRun(id: number, status: 'success' | 'partial' | 'failed', stats: RunStats): void;
+}
+
+export function createRunsRepo(db: SqliteDatabase, now: () => Date): RunsRepo {
+  const insert = db.prepare(`INSERT INTO runs (started_at, status) VALUES (?, 'running')`);
+  const update = db.prepare(
+    `UPDATE runs
+     SET finished_at = ?, status = ?, comments_found = ?, comments_notified = ?, error_message = ?, source_stats = ?
+     WHERE id = ?`,
+  );
+  return {
+    startRun() {
+      const info = insert.run(now().toISOString());
+      return Number(info.lastInsertRowid);
+    },
+    finishRun(id, status, stats) {
+      update.run(
+        now().toISOString(),
+        status,
+        stats.commentsFound,
+        stats.commentsNotified,
+        stats.errorMessage ?? null,
+        stats.sourceStats ? JSON.stringify(stats.sourceStats) : null,
+        id,
+      );
+    },
+  };
+}
+```
+
+Update `packages/storage/src/index.ts` to add:
+
+```ts
+export { createRunsRepo } from './runs-repo.js';
+export type { RunsRepo, RunStats } from './runs-repo.js';
+```
+
+- [ ] **Step 4: Run test, verify pass**
+
+Run: `pnpm --filter @work-summary/storage test`
+
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/storage
+git commit -m "feat(storage): runsRepo (startRun, finishRun)"
+```
+
+---
+
+### Task 12: `storage` - watermarksRepo
+
+**Files:**
+- Create: `packages/storage/src/watermarks-repo.ts`
+- Test: `packages/storage/src/watermarks-repo.test.ts`
+- Modify: `packages/storage/src/index.ts`
+
+**Interfaces:**
+- Consumes: `SqliteDatabase`.
+- Produces:
+  - `createWatermarksRepo(db): WatermarksRepo`
+  - `WatermarksRepo.get(source: string, repo: string): string | null` - last success ISO or null.
+  - `WatermarksRepo.set(source: string, repo: string, isoTimestamp: string): void` - upsert.
+
+- [ ] **Step 1: Write failing test**
+
+Create `packages/storage/src/watermarks-repo.test.ts`:
+
+```ts
+import { describe, it, expect, beforeEach } from 'vitest';
+import { openDatabase, runMigrations } from './index.js';
+import { createWatermarksRepo } from './watermarks-repo.js';
+import type { SqliteDatabase } from './db.js';
+
+let db: SqliteDatabase;
+beforeEach(() => {
+  db = openDatabase(':memory:');
+  runMigrations(db);
+});
+
+describe('watermarksRepo', () => {
+  it('get returns null when no watermark exists', () => {
+    const r = createWatermarksRepo(db);
+    expect(r.get('github', 'org/repo')).toBeNull();
+  });
+
+  it('set then get returns the stored timestamp', () => {
+    const r = createWatermarksRepo(db);
+    r.set('github', 'org/repo', '2026-06-01T00:00:00Z');
+    expect(r.get('github', 'org/repo')).toBe('2026-06-01T00:00:00Z');
+  });
+
+  it('set upserts (second set overwrites)', () => {
+    const r = createWatermarksRepo(db);
+    r.set('github', 'org/repo', '2026-06-01T00:00:00Z');
+    r.set('github', 'org/repo', '2026-06-02T00:00:00Z');
+    expect(r.get('github', 'org/repo')).toBe('2026-06-02T00:00:00Z');
+  });
+
+  it('keeps watermarks per (source, repo) independent', () => {
+    const r = createWatermarksRepo(db);
+    r.set('github', 'org/a', '2026-06-01T00:00:00Z');
+    r.set('github', 'org/b', '2026-06-02T00:00:00Z');
+    expect(r.get('github', 'org/a')).toBe('2026-06-01T00:00:00Z');
+    expect(r.get('github', 'org/b')).toBe('2026-06-02T00:00:00Z');
+  });
+});
+```
+
+- [ ] **Step 2: Run test, verify failure**
+
+Run: `pnpm --filter @work-summary/storage test watermarks-repo`
+
+Expected: FAIL.
+
+- [ ] **Step 3: Implement repo**
+
+Create `packages/storage/src/watermarks-repo.ts`:
+
+```ts
+import type { SqliteDatabase } from './db.js';
+
+export interface WatermarksRepo {
+  get(source: string, repo: string): string | null;
+  set(source: string, repo: string, isoTimestamp: string): void;
+}
+
+export function createWatermarksRepo(db: SqliteDatabase): WatermarksRepo {
+  const getStmt = db.prepare(
+    'SELECT last_success_at FROM source_watermarks WHERE source = ? AND repo = ?',
+  );
+  const setStmt = db.prepare(
+    `INSERT INTO source_watermarks (source, repo, last_success_at)
+     VALUES (?, ?, ?)
+     ON CONFLICT(source, repo) DO UPDATE SET last_success_at = excluded.last_success_at`,
+  );
+  return {
+    get(source, repo) {
+      const row = getStmt.get(source, repo) as { last_success_at: string } | undefined;
+      return row ? row.last_success_at : null;
+    },
+    set(source, repo, isoTimestamp) {
+      setStmt.run(source, repo, isoTimestamp);
+    },
+  };
+}
+```
+
+Update `packages/storage/src/index.ts`:
+
+```ts
+export { createWatermarksRepo } from './watermarks-repo.js';
+export type { WatermarksRepo } from './watermarks-repo.js';
+```
+
+- [ ] **Step 4: Run test, verify pass**
+
+Run: `pnpm --filter @work-summary/storage test`
+
+Expected: PASS, all storage tests (migrate, comments-repo, runs-repo, watermarks-repo).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/storage
+git commit -m "feat(storage): watermarksRepo (get/set per source+repo)"
+```
+
+---
+
+
