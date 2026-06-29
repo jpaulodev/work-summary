@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title><%= it.subject %></title></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#24292f;max-width:720px;margin:0 auto;padding:24px">
+  <h1 style="font-size:20px;border-bottom:1px solid #d0d7de;padding-bottom:8px"><%= it.subject %></h1>
+  <p style="color:#57606a;font-size:13px">Generated at <%= it.generatedAt %></p>
+  <% if (it.groups.length === 0) { %>
+    <p>No new comments since last run.</p>
+  <% } else { %>
+    <% it.groups.forEach(function(group) { %>
+      <h2 style="font-size:16px;margin-top:24px;color:#0969da"><%= group.repo %></h2>
+      <% group.containers.forEach(function(container) { %>
+        <h3 style="font-size:14px;margin-top:12px"><a href="<%= container.url %>" style="color:#0969da;text-decoration:none">#<%= container.number %> <%= container.title %></a></h3>
+        <% container.comments.forEach(function(c) { %>
+          <div style="border:1px solid #d0d7de;border-radius:6px;padding:12px;margin:8px 0;background:#f6f8fa">
+            <div style="font-size:12px;color:#57606a;margin-bottom:6px">
+              <strong>@<%= c.author %></strong> - <%= c.createdAt %>
+              <% c.matchedRules.forEach(function(r) { %>
+                <span style="display:inline-block;background:#dafbe1;color:#1a7f37;padding:2px 6px;border-radius:10px;font-size:11px;margin-left:4px"><%= r %></span>
+              <% }) %>
+            </div>
+            <div style="font-size:13px;white-space:pre-wrap"><%= c.bodyPreview %></div>
+            <a href="<%= c.url %>" style="font-size:12px;color:#0969da">View on GitHub -&gt;</a>
+          </div>
+        <% }) %>
+      <% }) %>
+    <% }) %>
+  <% } %>
+</body>
+</html>

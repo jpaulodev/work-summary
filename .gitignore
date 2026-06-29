@@ -6,3 +6,5 @@ dist/
 .env
 .env.local
 coverage/
+*.db
+*.db-journal
