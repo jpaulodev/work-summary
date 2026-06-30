@@ -84,4 +84,56 @@ describe('JiraPanel', () => {
       ),
     );
   });
+
+  it('detects and saves the Developer custom field', async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes('/jira/site/fields/discover'))
+        return Promise.resolve(
+          new Response(
+            JSON.stringify([{ id: 'customfield_200', name: 'Developer', custom: true }]),
+            { status: 200 },
+          ),
+        );
+      if (u.includes('/jira/site/projects'))
+        return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }));
+      if (u.endsWith('/jira/site') && init?.method === 'PUT')
+        return Promise.resolve(new Response(JSON.stringify({}), { status: 200 }));
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            connected: true,
+            site: {
+              id: 'cloud-1',
+              baseUrl: 'https://acme.atlassian.net',
+              developerFieldId: null,
+              enabled: true,
+            },
+          }),
+          { status: 200 },
+        ),
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderPanel();
+    fireEvent.click(await screen.findByRole('button', { name: /detect fields/i }));
+    // The discovered field appears as an option, then selecting it PUTs the id.
+    await waitFor(() =>
+      expect(
+        screen.getByRole('option', { name: /Developer \(customfield_200\)/ }),
+      ).toBeInTheDocument(),
+    );
+    fireEvent.change(screen.getByRole('combobox', { name: /developer field/i }), {
+      target: { value: 'customfield_200' },
+    });
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('/jira/site'),
+        expect.objectContaining({
+          method: 'PUT',
+          body: JSON.stringify({ developerFieldId: 'customfield_200' }),
+        }),
+      ),
+    );
+  });
 });
