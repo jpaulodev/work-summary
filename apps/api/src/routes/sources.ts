@@ -1,11 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { createSourceConfigRepo } from '@work-summary/config-db';
+import { createSourceConfigRepo, createOAuthConnectionService } from '@work-summary/config-db';
 import { authed } from '../plugins/auth-guard.js';
 
 const PutSchema = z.object({
   enabled: z.boolean().optional(),
-  token: z.string().min(1).optional(),
   repos: z.array(z.string()).optional(),
   rules: z
     .object({
@@ -27,18 +26,18 @@ export default function sourcesRoutes(
   app.get(
     '/sources',
     authed(() => {
-      const repo = createSourceConfigRepo(app.db, app.masterKey);
-      const g = repo.getGithub();
+      const g = createSourceConfigRepo(app.db).getGithub();
+      const conn = createOAuthConnectionService(app.db, app.masterKey).getView(1, 'github');
       return {
-        github: g
-          ? {
-              enabled: g.enabled,
-              repos: g.repos,
-              rules: g.rules,
-              filters: g.filters,
-              hasToken: true,
-            }
-          : null,
+        github: {
+          enabled: g?.enabled ?? true,
+          repos: g?.repos ?? [],
+          rules: g?.rules ?? null,
+          filters: g?.filters ?? null,
+          connection: conn
+            ? { accountLogin: conn.accountLogin, connectedAt: conn.connectedAt }
+            : null,
+        },
       };
     }),
   );
@@ -47,7 +46,7 @@ export default function sourcesRoutes(
     '/sources/github',
     authed((req) => {
       const body = PutSchema.parse(req.body);
-      createSourceConfigRepo(app.db, app.masterKey).putGithub(body);
+      createSourceConfigRepo(app.db).putGithub(body);
       return { ok: true };
     }),
   );

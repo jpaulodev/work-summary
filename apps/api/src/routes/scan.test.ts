@@ -20,9 +20,9 @@ describe('scan routes', () => {
     expect(res.json<{ running: boolean }>().running).toBe(false);
   });
 
-  it('400 when github is not configured', async () => {
+  it('400 when no source is connected', async () => {
     const res = await app.inject({ method: 'POST', url: '/api/scan', headers: { cookie } });
     expect(res.statusCode).toBe(400);
-    expect(res.json<{ error: string }>().error).toMatch(/source config/i);
+    expect(res.json<{ error: string }>().error).toMatch(/no source connected/i);
   });
 });

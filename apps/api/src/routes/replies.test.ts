@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { makeTestApp, authedCookie, TEST_KEY } from '../test-helpers.js';
-import { createSourceConfigRepo } from '@work-summary/config-db';
+import { createOAuthConnectionService } from '@work-summary/config-db';
 import type { SqliteDatabase } from '@work-summary/storage';
 
 let app: Awaited<ReturnType<typeof makeTestApp>>['app'];
@@ -16,18 +16,10 @@ function seedGithubComment(id: string, commentUrl: string): void {
 }
 
 function configureGithub(): void {
-  createSourceConfigRepo(db, TEST_KEY).putGithub({
-    enabled: true,
-    token: 'ghp_token',
-    repos: ['me/repo'],
-    rules: {
-      authorOfPrUnanswered: true,
-      mentioned: true,
-      repliedBeforeThenFollowup: true,
-      assignee: true,
-      changesRequested: true,
-    },
-    filters: { excludeBots: false, botWhitelist: [] },
+  // The reply path reads the GitHub token from the OAuth connection.
+  createOAuthConnectionService(db, TEST_KEY).save(1, 'github', {
+    accessToken: 'ghp_token',
+    accountLogin: 'me',
   });
 }
 

@@ -1,6 +1,10 @@
 import { randomBytes } from 'node:crypto';
 import { deriveMasterKey, hashPassword, verifyPassword } from '@work-summary/auth';
-import { createSourceConfigRepo, createNotifierConfigRepo } from '@work-summary/config-db';
+import {
+  createSourceConfigRepo,
+  createNotifierConfigRepo,
+  createOAuthConnectionService,
+} from '@work-summary/config-db';
 import type { SqliteDatabase } from '@work-summary/storage';
 import { ConfigError, type Config } from './config.js';
 
@@ -41,8 +45,12 @@ export function hasDbConfig(db: SqliteDatabase): boolean {
 }
 
 export function loadConfigFromDb(db: SqliteDatabase, key: Buffer, githubLogin: string): Config {
-  const src = createSourceConfigRepo(db, key).getGithub();
+  const src = createSourceConfigRepo(db).getGithub();
   if (!src) throw new ConfigError('No source config in DB');
+  const tokens = createOAuthConnectionService(db, key).getTokens(1, 'github');
+  if (!tokens)
+    throw new ConfigError('GitHub is not connected (run import-yaml or connect via the dashboard)');
+  const login = githubLogin || tokens.accountLogin || '';
   const notifs = createNotifierConfigRepo(db, key);
   // The CLI only sends email; webhook notifiers (slack/teams) are delivered by
   // the API scan process, so they are filtered out of the CLI config here.
@@ -64,9 +72,14 @@ export function loadConfigFromDb(db: SqliteDatabase, key: Buffer, githubLogin: s
     });
   if (notifications.length === 0) throw new ConfigError('No SMTP notifier config in DB');
   return {
-    user: { githubLogin },
+    user: { githubLogin: login },
     sources: {
-      github: { token: src.token, repos: src.repos, rules: src.rules, filters: src.filters },
+      github: {
+        token: tokens.accessToken,
+        repos: src.repos,
+        rules: src.rules,
+        filters: src.filters,
+      },
     },
     scan: { lookbackDays: 7, concurrency: 3 },
     notifications,

@@ -71,6 +71,9 @@ importers:
       '@work-summary/notifiers':
         specifier: workspace:*
         version: link:../../packages/notifiers
+      '@work-summary/oauth':
+        specifier: workspace:*
+        version: link:../../packages/oauth
       '@work-summary/scheduler':
         specifier: workspace:*
         version: link:../../packages/scheduler
@@ -354,6 +357,15 @@ importers:
       smtp-tester:
         specifier: ^2.1.0
         version: 2.1.0
+      typescript:
+        specifier: ^5.5.4
+        version: 5.9.3
+      vitest:
+        specifier: ^2.0.5
+        version: 2.1.9(@types/node@20.19.43)(jsdom@25.0.1)(msw@2.14.6(@types/node@20.19.43)(typescript@5.9.3))
+
+  packages/oauth:
+    devDependencies:
       typescript:
         specifier: ^5.5.4
         version: 5.9.3

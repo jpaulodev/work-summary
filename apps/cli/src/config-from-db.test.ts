@@ -1,7 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { randomBytes } from 'node:crypto';
 import { openDatabase, runMigrations } from '@work-summary/storage';
-import { createSourceConfigRepo, createNotifierConfigRepo } from '@work-summary/config-db';
+import {
+  createSourceConfigRepo,
+  createNotifierConfigRepo,
+  createOAuthConnectionService,
+} from '@work-summary/config-db';
 import { loadConfigFromDb, hasDbConfig } from './config-db-loader.js';
 
 const key = randomBytes(32);
@@ -13,9 +17,8 @@ describe('loadConfigFromDb', () => {
 
     expect(hasDbConfig(db)).toBe(false);
 
-    createSourceConfigRepo(db, key).putGithub({
+    createSourceConfigRepo(db).putGithub({
       enabled: true,
-      token: 'ghp_db_token',
       repos: ['org/a', 'org/b'],
       rules: {
         authorOfPrUnanswered: true,
@@ -25,6 +28,11 @@ describe('loadConfigFromDb', () => {
         changesRequested: true,
       },
       filters: { excludeBots: true, botWhitelist: ['dependabot[bot]'] },
+    });
+    // The GitHub token now lives in the OAuth connection table.
+    createOAuthConnectionService(db, key).save(1, 'github', {
+      accessToken: 'ghp_db_token',
+      accountLogin: 'me',
     });
     createNotifierConfigRepo(db, key).put('primary-email', {
       enabled: true,

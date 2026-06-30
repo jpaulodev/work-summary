@@ -1,5 +1,9 @@
 import { renameSync } from 'node:fs';
-import { createSourceConfigRepo, createNotifierConfigRepo } from '@work-summary/config-db';
+import {
+  createSourceConfigRepo,
+  createNotifierConfigRepo,
+  createOAuthConnectionService,
+} from '@work-summary/config-db';
 import type { SqliteDatabase } from '@work-summary/storage';
 import { loadConfig } from '../config.js';
 
@@ -21,12 +25,18 @@ export function runImportYaml(opts: {
 }): ImportYamlResult {
   const cfg = loadConfig(opts.configPath, opts.env);
 
-  createSourceConfigRepo(opts.db, opts.key).putGithub({
+  createSourceConfigRepo(opts.db).putGithub({
     enabled: true,
-    token: cfg.sources.github.token,
     repos: cfg.sources.github.repos,
     rules: cfg.sources.github.rules,
     filters: cfg.sources.github.filters,
+  });
+  // The GitHub token now lives in oauth_connection. A pasted PAT is interchangeable
+  // with an OAuth access token (Octokit sends both as a bearer), so importing the
+  // YAML token here keeps the CLI-from-DB path working without an OAuth round trip.
+  createOAuthConnectionService(opts.db, opts.key).save(1, 'github', {
+    accessToken: cfg.sources.github.token,
+    accountLogin: cfg.user.githubLogin,
   });
 
   const notifiers = createNotifierConfigRepo(opts.db, opts.key);

@@ -1,9 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { randomBytes } from 'node:crypto';
 import { openDatabase, runMigrations } from '@work-summary/storage';
 import { createSourceConfigRepo } from './source.js';
-
-const key = randomBytes(32);
 
 let db: ReturnType<typeof openDatabase>;
 beforeEach(() => {
@@ -21,50 +18,48 @@ const fullRules = {
 
 describe('sourceConfigRepo', () => {
   it('returns null when no config', () => {
-    expect(createSourceConfigRepo(db, key).getGithub()).toBeNull();
+    expect(createSourceConfigRepo(db).getGithub()).toBeNull();
   });
 
-  it('round-trips github config with encrypted token', () => {
-    const repo = createSourceConfigRepo(db, key);
+  it('round-trips github config (no token — token lives in oauth_connection)', () => {
+    const repo = createSourceConfigRepo(db);
     repo.putGithub({
       enabled: true,
-      token: 'ghp_xxx',
       repos: ['org/a'],
       rules: fullRules,
       filters: { excludeBots: true, botWhitelist: [] },
     });
     const got = repo.getGithub();
-    expect(got?.token).toBe('ghp_xxx');
+    expect(got?.enabled).toBe(true);
     expect(got?.repos).toEqual(['org/a']);
+    expect(got?.rules.mentioned).toBe(true);
   });
 
-  it('preserves token when put without token field', () => {
-    const repo = createSourceConfigRepo(db, key);
+  it('merges repos on a subsequent put without losing rules/filters', () => {
+    const repo = createSourceConfigRepo(db);
     repo.putGithub({
       enabled: true,
-      token: 'ghp_xxx',
       repos: ['org/a'],
       rules: fullRules,
-      filters: { excludeBots: true, botWhitelist: [] },
+      filters: { excludeBots: false, botWhitelist: ['dependabot'] },
     });
     repo.putGithub({ repos: ['org/b'] });
     const got = repo.getGithub();
-    expect(got?.token).toBe('ghp_xxx');
     expect(got?.repos).toEqual(['org/b']);
+    expect(got?.filters).toEqual({ excludeBots: false, botWhitelist: ['dependabot'] });
   });
 
-  it('does not store the token as plaintext in the DB', () => {
-    const repo = createSourceConfigRepo(db, key);
+  it('stores no token columns for github', () => {
+    const repo = createSourceConfigRepo(db);
     repo.putGithub({
-      token: 'ghp_secret_value',
       repos: ['org/a'],
       rules: fullRules,
       filters: { excludeBots: true, botWhitelist: [] },
     });
     const raw = db
-      .prepare('SELECT token_ciphertext, config_json FROM source_config WHERE source = ?')
-      .get('github') as { token_ciphertext: string; config_json: string };
-    expect(raw.token_ciphertext).not.toContain('ghp_secret_value');
-    expect(raw.config_json).not.toContain('ghp_secret_value');
+      .prepare('SELECT token_ciphertext, token_nonce FROM source_config WHERE source = ?')
+      .get('github') as { token_ciphertext: string | null; token_nonce: string | null };
+    expect(raw.token_ciphertext).toBeNull();
+    expect(raw.token_nonce).toBeNull();
   });
 });

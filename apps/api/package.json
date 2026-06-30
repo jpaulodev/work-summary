@@ -27,6 +27,7 @@
     "@work-summary/notifiers": "workspace:*",
     "@work-summary/notifier-slack": "workspace:*",
     "@work-summary/notifier-teams": "workspace:*",
+    "@work-summary/oauth": "workspace:*",
     "@work-summary/scheduler": "workspace:*",
     "@work-summary/storage": "workspace:*",
     "@fastify/cookie": "^10.0.1",
