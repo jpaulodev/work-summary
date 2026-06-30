@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
@@ -17,6 +17,8 @@ export function Dialog({
   children: ReactNode;
   footer?: ReactNode;
 }): JSX.Element | null {
+  const containerRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent): void => {
@@ -26,6 +28,16 @@ export function Dialog({
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
+  // Move focus into the dialog on open and restore it to the trigger on close.
+  useEffect(() => {
+    if (!open) return;
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    containerRef.current
+      ?.querySelector<HTMLElement>('input, textarea, button, [tabindex]')
+      ?.focus();
+    return () => previouslyFocused?.focus();
+  }, [open]);
+
   if (!open) return null;
 
   return (
@@ -34,6 +46,7 @@ export function Dialog({
       onClick={onClose}
     >
       <div
+        ref={containerRef}
         role="dialog"
         aria-modal="true"
         aria-label={title}

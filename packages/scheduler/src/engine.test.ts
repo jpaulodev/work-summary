@@ -68,6 +68,49 @@ describe('ScheduleEngine', () => {
     engine.stop();
   });
 
+  it('persists nextRunAt on register, before the first tick', () => {
+    const repo = makeRepo();
+    repo.insert({
+      id: 's1',
+      name: 'x',
+      enabled: true,
+      cronExpression: '0 * * * *',
+      timezone: 'UTC',
+      reposFilter: null,
+    });
+    const engine = new ScheduleEngine({
+      scheduleRepo: repo,
+      runScan: vi.fn().mockResolvedValue({ runId: 1 }),
+    });
+    engine.start();
+    expect(repo.get('s1')?.nextRunAt).not.toBeNull();
+    engine.stop();
+  });
+
+  it('keeps nextRunAt fresh even when a tick fails', async () => {
+    const repo = makeRepo();
+    repo.insert({
+      id: 's1',
+      name: 'x',
+      enabled: true,
+      cronExpression: '* * * * *',
+      timezone: 'UTC',
+      reposFilter: null,
+    });
+    const engine = new ScheduleEngine({
+      scheduleRepo: repo,
+      runScan: vi.fn().mockRejectedValue(new Error('already-running')),
+      logger: { error: () => undefined },
+    });
+    engine.start();
+    const before = repo.get('s1')?.nextRunAt;
+    await vi.advanceTimersByTimeAsync(61_000);
+    const after = repo.get('s1')?.nextRunAt;
+    expect(after).not.toBeNull();
+    expect(after).not.toBe(before); // advanced to the next occurrence
+    engine.stop();
+  });
+
   it('upsert registers and remove deregisters', () => {
     const repo = makeRepo();
     repo.insert({

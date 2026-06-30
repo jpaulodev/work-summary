@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CalendarClock, Loader2, Plus, Trash2 } from 'lucide-react';
 import {
   useSchedules,
@@ -131,6 +131,15 @@ function CreateScheduleDialog({
   const [name, setName] = useState('');
   const [cron, setCron] = useState('');
   const [error, setError] = useState<string | null>(null);
+
+  // Reset the form each time the dialog is opened.
+  useEffect(() => {
+    if (open) {
+      setName('');
+      setCron('');
+      setError(null);
+    }
+  }, [open]);
 
   const submit = (): void => {
     setError(null);
