@@ -1,9 +1,11 @@
+import { useState } from 'react';
 import {
   Check,
   CircleDot,
   Clock,
   ExternalLink,
   GitPullRequest,
+  Reply,
   RotateCcw,
   SquareKanban,
 } from 'lucide-react';
@@ -11,6 +13,8 @@ import type { CommentRow, CommentStatus } from '../lib/types';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { cn, relativeTime } from '../lib/utils';
+import { useReplies } from '../lib/replies';
+import { ReplyComposer } from './reply-composer';
 
 const RULE_LABELS: Record<string, string> = {
   author_of_pr_unanswered: 'PR author',
@@ -40,6 +44,9 @@ export function CommentCard({
   comment: CommentRow;
   onStatusChange: (status: CommentStatus) => void;
 }): JSX.Element {
+  const [showComposer, setShowComposer] = useState(false);
+  const replies = useReplies(comment.id, true);
+  const replyCount = replies.data?.length ?? 0;
   const isJira = comment.source === 'jira';
   const containerUrl = isJira
     ? jiraBrowseUrl(comment.repo, comment.issueKey)
@@ -74,9 +81,16 @@ export function CommentCard({
             <span className="text-muted-foreground">@{comment.author}</span>
           </p>
         </div>
-        <Badge tone={STATUS_TONE[comment.status]} className="shrink-0 capitalize">
-          {comment.status}
-        </Badge>
+        <div className="flex shrink-0 items-center gap-2">
+          {replyCount > 0 && (
+            <Badge tone="success">
+              {replyCount} {replyCount === 1 ? 'reply' : 'replies'} sent
+            </Badge>
+          )}
+          <Badge tone={STATUS_TONE[comment.status]} className="capitalize">
+            {comment.status}
+          </Badge>
+        </div>
       </div>
 
       <div className="mt-3 flex flex-wrap gap-1.5">
@@ -114,17 +128,24 @@ export function CommentCard({
         <Button size="sm" variant="ghost" onClick={() => onStatusChange('snoozed')}>
           <Clock className="h-3.5 w-3.5" /> Snooze
         </Button>
+        <Button
+          size="sm"
+          variant={showComposer ? 'secondary' : 'ghost'}
+          className="ml-auto"
+          onClick={() => setShowComposer((s) => !s)}
+        >
+          <Reply className="h-3.5 w-3.5" /> Reply
+        </Button>
         {comment.status !== 'pending' && (
-          <Button
-            size="sm"
-            variant="ghost"
-            className="ml-auto"
-            onClick={() => onStatusChange('pending')}
-          >
+          <Button size="sm" variant="ghost" onClick={() => onStatusChange('pending')}>
             <RotateCcw className="h-3.5 w-3.5" /> Reopen
           </Button>
         )}
       </div>
+
+      {showComposer && (
+        <ReplyComposer commentId={comment.id} onClose={() => setShowComposer(false)} />
+      )}
     </div>
   );
 }
