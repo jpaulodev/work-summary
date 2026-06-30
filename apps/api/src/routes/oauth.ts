@@ -12,6 +12,7 @@ import {
 import { createOAuthConnectionService } from '@work-summary/config-db';
 import { authed } from '../plugins/auth-guard.js';
 import { oauthClientCredentials, publicBaseUrl, redirectUri } from '../oauth-config.js';
+import { cookieSecure } from '../cookies.js';
 
 const STATE_COOKIE = 'ws_oauth_state';
 
@@ -36,7 +37,7 @@ export default function oauthRoutes(app: FastifyInstance, _opts: unknown, done: 
       void reply.setCookie(STATE_COOKIE, signSessionId(`${provider}:${state}`, app.sessionSecret), {
         httpOnly: true,
         sameSite: 'lax',
-        secure: process.env.NODE_ENV === 'production',
+        secure: cookieSecure(),
         maxAge: 600,
         path: '/',
       });
