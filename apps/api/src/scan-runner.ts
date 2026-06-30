@@ -12,12 +12,23 @@ export function scanStatus(): { running: boolean; runId?: number } {
   return lastRunId === undefined ? { running } : { running, runId: lastRunId };
 }
 
-export async function triggerScan(app: FastifyInstance): Promise<{ runId: number }> {
+export interface TriggerScanOptions {
+  triggeredBy?: string;
+  reposFilter?: string[] | null;
+}
+
+export async function triggerScan(
+  app: FastifyInstance,
+  opts: TriggerScanOptions = {},
+): Promise<{ runId: number }> {
   if (running) throw new Error('already-running');
   running = true;
   try {
     // Reuse the same DB-backed config builder the CLI uses so the two stay in sync.
     const config = loadConfigFromDb(app.db, app.masterKey, process.env.GITHUB_LOGIN ?? '');
+    if (opts.reposFilter && opts.reposFilter.length > 0) {
+      config.sources.github.repos = opts.reposFilter;
+    }
     const notif = config.notifications.find((n) => n.enabled);
     if (!notif) throw new Error('no enabled notifier');
 
@@ -34,6 +45,7 @@ export async function triggerScan(app: FastifyInstance): Promise<{ runId: number
       },
       dryRun: false,
       now: () => new Date(),
+      triggeredBy: opts.triggeredBy ?? 'manual',
     });
 
     lastRunId = result.runId;

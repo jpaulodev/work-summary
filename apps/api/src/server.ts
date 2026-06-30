@@ -13,7 +13,10 @@ import notifiersRoutes from './routes/notifiers.js';
 import commentsRoutes from './routes/comments.js';
 import runsRoutes from './routes/runs.js';
 import scanRoutes from './routes/scan.js';
-import type { SqliteDatabase } from '@work-summary/storage';
+import schedulesRoutes from './routes/schedules.js';
+import { triggerScan } from './scan-runner.js';
+import { ScheduleRepository, type SqliteDatabase } from '@work-summary/storage';
+import { ScheduleEngine } from '@work-summary/scheduler';
 
 export interface ServerDeps {
   db: SqliteDatabase;
@@ -28,6 +31,8 @@ declare module 'fastify' {
     masterKey: Buffer;
     sessionSecret: Buffer;
     now: () => Date;
+    scheduleRepo: ScheduleRepository;
+    scheduleEngine: ScheduleEngine;
   }
 }
 
@@ -51,6 +56,20 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   app.decorate('sessionSecret', deps.sessionSecret);
   app.decorate('now', deps.now);
 
+  const scheduleRepo = new ScheduleRepository(deps.db);
+  const scheduleEngine = new ScheduleEngine({
+    scheduleRepo,
+    runScan: (o) => triggerScan(app, o),
+    logger: { error: (msg, err) => process.stderr.write(`${msg}: ${String(err)}\n`) },
+  });
+  app.decorate('scheduleRepo', scheduleRepo);
+  app.decorate('scheduleEngine', scheduleEngine);
+  scheduleEngine.start();
+  app.addHook('onClose', (_instance, hookDone) => {
+    scheduleEngine.stop();
+    hookDone();
+  });
+
   await app.register(cookie);
   await app.register(authGuard, { sessionSecret: deps.sessionSecret });
 
@@ -61,6 +80,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(commentsRoutes, { prefix: '/api' });
   await app.register(runsRoutes, { prefix: '/api' });
   await app.register(scanRoutes, { prefix: '/api' });
+  await app.register(schedulesRoutes, { prefix: '/api' });
 
   if (process.env.NODE_ENV === 'production') {
     const webDist = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'web', 'dist');

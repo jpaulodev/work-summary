@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './api';
-import type { GithubSource, MatchRules, NotifierItem, RunRow, ScanStatus } from './types';
+import type { GithubSource, MatchRules, NotifierItem, RunRow, ScanStatus, Schedule } from './types';
 
 // Sources
 export function useSources() {
@@ -85,5 +85,46 @@ export function useTriggerScan() {
       void qc.invalidateQueries({ queryKey: ['runs'] });
       void qc.invalidateQueries({ queryKey: ['scan-status'] });
     },
+  });
+}
+
+// Schedules
+export function useSchedules() {
+  return useQuery({
+    queryKey: ['schedules'],
+    queryFn: () => api.get<Schedule[]>('/schedules'),
+  });
+}
+
+export function useCreateSchedule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { name: string; cronExpression: string; timezone?: string }) =>
+      api.post<Schedule>('/schedules', input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['schedules'] }),
+  });
+}
+
+export function useUpdateSchedule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      id: string;
+      enabled?: boolean;
+      cronExpression?: string;
+      name?: string;
+    }) => {
+      const { id, ...patch } = input;
+      return api.put<Schedule>(`/schedules/${id}`, patch);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['schedules'] }),
+  });
+}
+
+export function useDeleteSchedule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.del<void>(`/schedules/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['schedules'] }),
   });
 }
