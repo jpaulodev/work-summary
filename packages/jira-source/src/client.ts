@@ -15,9 +15,10 @@ export interface JiraComment {
 }
 
 export interface JiraClientOptions {
-  baseUrl: string;
-  email: string;
-  token: string;
+  /** OAuth 2.0 (3LO) bearer access token. */
+  accessToken: string;
+  /** Atlassian cloud id; the REST base becomes api.atlassian.com/ex/jira/{cloudId}. */
+  cloudId: string;
   /** Injectable for tests; defaults to a real delay. */
   sleep?: (ms: number) => Promise<void>;
 }
@@ -26,15 +27,17 @@ const defaultSleep = (ms: number): Promise<void> => new Promise((r) => setTimeou
 
 export class JiraClient {
   private readonly authHeader: string;
+  private readonly baseUrl: string;
   private readonly sleep: (ms: number) => Promise<void>;
 
-  constructor(private readonly opts: JiraClientOptions) {
-    this.authHeader = 'Basic ' + Buffer.from(`${opts.email}:${opts.token}`).toString('base64');
+  constructor(opts: JiraClientOptions) {
+    this.authHeader = `Bearer ${opts.accessToken}`;
+    this.baseUrl = `https://api.atlassian.com/ex/jira/${opts.cloudId}`;
     this.sleep = opts.sleep ?? defaultSleep;
   }
 
   private async req<T>(path: string, attempt = 0): Promise<T> {
-    const res = await fetch(`${this.opts.baseUrl}${path}`, {
+    const res = await fetch(`${this.baseUrl}${path}`, {
       headers: { authorization: this.authHeader, accept: 'application/json' },
     });
     if (res.status === 429 && attempt < 3) {
@@ -85,7 +88,7 @@ export class JiraClient {
 
   async addComment(issueKey: string, adfBody: unknown): Promise<{ id: string; self: string }> {
     const res = await fetch(
-      `${this.opts.baseUrl}/rest/api/3/issue/${encodeURIComponent(issueKey)}/comment`,
+      `${this.baseUrl}/rest/api/3/issue/${encodeURIComponent(issueKey)}/comment`,
       {
         method: 'POST',
         headers: {

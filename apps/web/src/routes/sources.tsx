@@ -127,9 +127,10 @@ export default function Sources(): JSX.Element {
         ))}
       </div>
 
-      {oauthResult.connected === 'github' && (
+      {oauthResult.connected && (
         <div className="mb-4 flex items-center gap-2 rounded-md border border-success/30 bg-success/10 p-3 text-sm text-success">
-          <Check className="h-4 w-4" /> GitHub connected.
+          <Check className="h-4 w-4" />{' '}
+          {oauthResult.connected === 'jira' ? 'JIRA connected.' : 'GitHub connected.'}
         </div>
       )}
       {oauthResult.error && (

@@ -105,6 +105,12 @@ export GITHUB_OAUTH_CLIENT_ID='Iv1.xxxxxxxx'
 export GITHUB_OAUTH_CLIENT_SECRET='xxxxxxxx'
 export PUBLIC_BASE_URL='http://127.0.0.1:3001'        # base for OAuth redirects (default shown)
 
+# (optional) JIRA OAuth 2.0 (3LO) app from https://developer.atlassian.com/console
+#   callback <PUBLIC_BASE_URL>/api/oauth/jira/callback; scopes read:jira-work
+#   read:jira-user write:jira-work offline_access.
+export JIRA_OAUTH_CLIENT_ID='xxxxxxxx'
+export JIRA_OAUTH_CLIENT_SECRET='xxxxxxxx'
+
 # 4. Start the API. In production it also serves the built dashboard from one origin.
 NODE_ENV=production node apps/api/dist/bin.js          # -> http://127.0.0.1:3001
 ```
@@ -127,7 +133,7 @@ Open **http://127.0.0.1:3001**, log in, then configure everything from the sideb
 | Screen                  | What you set up                                                                                                                                                                                                                 |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Sources**             | **Connect GitHub** with OAuth (one click — no token pasting), list `owner/repo` entries, toggle the five matching rules, configure the bot filter.                                                                              |
-| **JIRA** (Sources area) | Add a JIRA site (base URL, email, API token), discover and pick projects. Scans then include JIRA issue comments.                                                                                                               |
+| **JIRA** (Sources area) | **Connect JIRA** with OAuth (Atlassian 3LO), then discover and pick projects. Scans then include JIRA issue comments.                                                                                                           |
 | **Notifications**       | Add one or more channels: **Email (SMTP)**, **Slack** (incoming webhook), or **Microsoft Teams** (incoming webhook). Each has a **Send test** button. Every enabled channel receives the digest.                                |
 | **Schedules**           | Create cron schedules (with timezone, optional repo filter) so scans run automatically — this replaces external cron.                                                                                                           |
 | **Dashboard**           | Triage matched comments: filter by status (pending / addressed / resolved / snoozed), mark/snooze/reopen, **Reply** inline (posts to GitHub/JIRA and marks the comment addressed), and **Run now** to trigger a scan on demand. |
@@ -179,6 +185,7 @@ Toggle each per source (UI Sources screen, or `sources.github.rules` in YAML):
 | `SMTP_USER` / `SMTP_PASS`                               | CLI       | SMTP credentials referenced from the YAML config.                                                               |
 | `MASTER_PASSPHRASE`                                     | API       | Derives the AES-256-GCM master key and session secret. Required to start the API. Use the same value every run. |
 | `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET` | API       | GitHub OAuth App credentials for the "Connect GitHub" flow.                                                     |
+| `JIRA_OAUTH_CLIENT_ID` / `JIRA_OAUTH_CLIENT_SECRET`     | API       | Atlassian OAuth 2.0 (3LO) credentials for the "Connect JIRA" flow.                                              |
 | `PUBLIC_BASE_URL`                                       | API       | Base URL used to build OAuth redirect URIs (default `http://127.0.0.1:3001`).                                   |
 | `PORT`                                                  | API       | API port (default `3001`).                                                                                      |
 | `NODE_ENV=production`                                   | API       | Also serve the built dashboard from the API origin.                                                             |

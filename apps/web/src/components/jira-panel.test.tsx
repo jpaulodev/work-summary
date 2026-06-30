@@ -15,54 +15,72 @@ function renderPanel() {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('JiraPanel', () => {
-  it('lists connected sites', async () => {
+  it('shows a Connect JIRA link when not connected', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify([
-            {
-              id: 's1',
-              baseUrl: 'https://acme.atlassian.net',
-              email: 'me@x.com',
-              developerFieldId: null,
-              enabled: true,
-              hasToken: true,
-            },
-          ]),
-          { status: 200 },
-        ),
-      ),
+      vi
+        .fn()
+        .mockResolvedValue(new Response(JSON.stringify({ connected: false }), { status: 200 })),
+    );
+    renderPanel();
+    const link = await screen.findByRole('link', { name: /connect jira/i });
+    expect(link).toHaveAttribute('href', '/api/oauth/jira/start');
+  });
+
+  it('shows the connected site host + Disconnect when connected', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string) => {
+        if (String(url).includes('/jira/site/projects'))
+          return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }));
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              connected: true,
+              site: {
+                id: 'cloud-1',
+                baseUrl: 'https://acme.atlassian.net',
+                developerFieldId: null,
+                enabled: true,
+              },
+            }),
+            { status: 200 },
+          ),
+        );
+      }),
     );
     renderPanel();
     await waitFor(() => expect(screen.getByText('acme.atlassian.net')).toBeInTheDocument());
-    expect(screen.getByText('me@x.com')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /disconnect/i })).toBeInTheDocument();
   });
 
-  it('posts a new site through the add dialog', async () => {
-    const fetchMock = vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
-      if (init?.method === 'POST') {
-        return Promise.resolve(
-          new Response(JSON.stringify({ id: 's2', hasToken: true }), { status: 201 }),
-        );
-      }
-      return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }));
+  it('calls DELETE /jira/site when disconnecting', async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (init?.method === 'DELETE') return Promise.resolve(new Response(null, { status: 204 }));
+      if (String(url).includes('/jira/site/projects'))
+        return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }));
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            connected: true,
+            site: {
+              id: 'cloud-1',
+              baseUrl: 'https://acme.atlassian.net',
+              developerFieldId: null,
+              enabled: true,
+            },
+          }),
+          { status: 200 },
+        ),
+      );
     });
     vi.stubGlobal('fetch', fetchMock);
-
     renderPanel();
-    fireEvent.click(screen.getByRole('button', { name: /add jira site/i }));
-    fireEvent.change(screen.getByLabelText(/base url/i), {
-      target: { value: 'https://acme.atlassian.net' },
-    });
-    fireEvent.change(screen.getByLabelText(/email/i), { target: { value: 'me@x.com' } });
-    fireEvent.change(screen.getByLabelText(/api token/i), { target: { value: 'tok12345' } });
-    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
-
+    fireEvent.click(await screen.findByRole('button', { name: /disconnect/i }));
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining('/api/jira/sites'),
-        expect.objectContaining({ method: 'POST' }),
+        expect.stringContaining('/api/jira/site'),
+        expect.objectContaining({ method: 'DELETE' }),
       ),
     );
   });

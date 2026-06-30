@@ -91,6 +91,6 @@ describe('github provider', () => {
   it('exposes provider metadata', () => {
     expect(defaultScopes('github')).toEqual(['repo', 'read:user']);
     expect(isSupportedProvider('github')).toBe(true);
-    expect(isSupportedProvider('jira')).toBe(false);
+    expect(isSupportedProvider('bitbucket')).toBe(false);
   });
 });

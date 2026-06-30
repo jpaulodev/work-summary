@@ -6,13 +6,16 @@ import { adfToText } from './adf.js';
 export interface JiraSourceDeps {
   sites: JiraSiteRow[];
   projects: JiraProjectRow[];
-  decryptToken: (encryptedToken: string, nonce: string) => string;
+  /** OAuth 2.0 bearer token (already refreshed) for the connected Atlassian account. */
+  accessToken: string;
+  /** Atlassian cloud id of the connected site. */
+  cloudId: string;
   /** Lookback window for comments. */
   since: Date;
   /** Number of days back to search issues by; defaults to 7. */
   lookbackDays?: number;
   /** Injectable for tests. */
-  makeClient?: (opts: { baseUrl: string; email: string; token: string }) => JiraClient;
+  makeClient?: (opts: { accessToken: string; cloudId: string }) => JiraClient;
   sleep?: (ms: number) => Promise<void>;
   logger?: { error: (msg: string, err: unknown) => void };
 }
@@ -107,9 +110,8 @@ export class JiraSource {
     }
   }
 
-  private makeClient(site: JiraSiteRow): JiraClient {
-    const token = this.deps.decryptToken(site.encryptedToken, site.tokenNonce);
-    const opts = { baseUrl: site.baseUrl, email: site.email, token };
+  private makeClient(_site: JiraSiteRow): JiraClient {
+    const opts = { accessToken: this.deps.accessToken, cloudId: this.deps.cloudId };
     return this.deps.makeClient
       ? this.deps.makeClient(opts)
       : new JiraClient({ ...opts, ...(this.deps.sleep ? { sleep: this.deps.sleep } : {}) });

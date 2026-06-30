@@ -3,9 +3,9 @@ import { z } from 'zod';
 import { createOctokit, postGithubReply } from '@work-summary/github-source';
 import { JiraClient, postJiraReply } from '@work-summary/jira-source';
 import { createOAuthConnectionService } from '@work-summary/config-db';
-import { decryptSecret } from '@work-summary/auth';
-import { CommentReplyRepository, JiraSiteRepository } from '@work-summary/storage';
+import { CommentReplyRepository } from '@work-summary/storage';
 import { authed } from '../plugins/auth-guard.js';
+import { getValidJiraAccess } from '../jira-access.js';
 
 const BodySchema = z.object({ body: z.string().min(1).max(10000) });
 
@@ -66,18 +66,13 @@ export default function repliesRoutes(
               .code(412)
               .send({ error: 'no-issue-key', message: 'Missing JIRA issue key.' });
           }
-          const baseUrl = comment.repo.split(' :: ')[0] ?? '';
-          const site = new JiraSiteRepository(app.db).list().find((s) => s.baseUrl === baseUrl);
-          if (!site) {
-            return reply.code(412).send({
-              error: 'no-source',
-              message: 'No JIRA site is configured for this comment.',
-            });
+          const jiraAccess = await getValidJiraAccess(app, 1);
+          if (!jiraAccess) {
+            return reply.code(412).send({ error: 'no-source', message: 'JIRA is not connected.' });
           }
           const client = new JiraClient({
-            baseUrl: site.baseUrl,
-            email: site.email,
-            token: decryptSecret(site.encryptedToken, site.tokenNonce, app.masterKey),
+            accessToken: jiraAccess.accessToken,
+            cloudId: jiraAccess.cloudId,
           });
           const r = await postJiraReply({ client, issueKey: comment.issue_key, body });
           result = { id: r.id, url: r.self };
