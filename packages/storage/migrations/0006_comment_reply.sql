@@ -9,8 +9,5 @@ CREATE TABLE comment_reply (
 );
 CREATE INDEX idx_comment_reply_comment ON comment_reply(comment_id);
 
-ALTER TABLE source_config ADD COLUMN can_write INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE jira_site ADD COLUMN can_write INTEGER NOT NULL DEFAULT 0;
-
 -- Store the canonical comment URL so replies can target the right upstream endpoint.
 ALTER TABLE notified_comments ADD COLUMN comment_url TEXT;

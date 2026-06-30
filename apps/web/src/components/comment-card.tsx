@@ -13,7 +13,6 @@ import type { CommentRow, CommentStatus } from '../lib/types';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { cn, relativeTime } from '../lib/utils';
-import { useReplies } from '../lib/replies';
 import { ReplyComposer } from './reply-composer';
 
 const RULE_LABELS: Record<string, string> = {
@@ -45,8 +44,7 @@ export function CommentCard({
   onStatusChange: (status: CommentStatus) => void;
 }): JSX.Element {
   const [showComposer, setShowComposer] = useState(false);
-  const replies = useReplies(comment.id, true);
-  const replyCount = replies.data?.length ?? 0;
+  const replyCount = comment.replyCount;
   const isJira = comment.source === 'jira';
   const containerUrl = isJira
     ? jiraBrowseUrl(comment.repo, comment.issueKey)

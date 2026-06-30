@@ -32,6 +32,7 @@ function sample(overrides: Partial<CommentRow> = {}): CommentRow {
     note: null,
     snoozedUntil: null,
     issueKey: null,
+    replyCount: 0,
     ...overrides,
   };
 }

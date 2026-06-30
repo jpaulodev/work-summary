@@ -42,10 +42,18 @@ export default function repliesRoutes(
       try {
         if (comment.source === 'github') {
           if (!comment.comment_url) {
-            return reply.code(412).send({ error: 'no-comment-url' });
+            return reply.code(412).send({
+              error: 'no-comment-url',
+              message:
+                'This comment was collected before reply support was added; re-scan to enable replying.',
+            });
           }
           const gh = createSourceConfigRepo(app.db, app.masterKey).getGithub();
-          if (!gh) return reply.code(412).send({ error: 'no-source' });
+          if (!gh) {
+            return reply
+              .code(412)
+              .send({ error: 'no-source', message: 'No GitHub source is configured.' });
+          }
           const r = await postGithubReply({
             octokit: createOctokit({ token: gh.token }),
             commentUrl: comment.comment_url,
@@ -53,10 +61,19 @@ export default function repliesRoutes(
           });
           result = { id: r.id, url: r.url };
         } else if (comment.source === 'jira') {
-          if (!comment.issue_key) return reply.code(412).send({ error: 'no-issue-key' });
+          if (!comment.issue_key) {
+            return reply
+              .code(412)
+              .send({ error: 'no-issue-key', message: 'Missing JIRA issue key.' });
+          }
           const baseUrl = comment.repo.split(' :: ')[0] ?? '';
           const site = new JiraSiteRepository(app.db).list().find((s) => s.baseUrl === baseUrl);
-          if (!site) return reply.code(412).send({ error: 'no-source' });
+          if (!site) {
+            return reply.code(412).send({
+              error: 'no-source',
+              message: 'No JIRA site is configured for this comment.',
+            });
+          }
           const client = new JiraClient({
             baseUrl: site.baseUrl,
             email: site.email,
