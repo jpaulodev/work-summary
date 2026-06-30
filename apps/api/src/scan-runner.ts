@@ -32,7 +32,7 @@ function buildCompositeSource(
   lookbackDays: number,
 ): Source {
   const siteRepo = new JiraSiteRepository(app.db, userId);
-  const projectRepo = new JiraProjectRepository(app.db);
+  const projectRepo = new JiraProjectRepository(app.db, userId);
   const sites = siteRepo.list();
   return {
     id: 'github',

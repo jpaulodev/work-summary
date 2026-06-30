@@ -119,23 +119,28 @@ export class ScheduleRepository {
     const cur = this.get(id);
     if (!cur) throw new Error(`Schedule ${id} not found`);
     const next = { ...cur, ...patch, updatedAt: new Date().toISOString() };
+    // Defense-in-depth: when user-scoped, never update another user's row even
+    // if the id collided. The engine (userId=null) updates by id alone.
+    const where = this.userId === null ? 'WHERE id = ?' : 'WHERE id = ? AND user_id = ?';
+    const args = [
+      next.name,
+      next.enabled ? 1 : 0,
+      next.cronExpression,
+      next.timezone,
+      next.reposFilter ? JSON.stringify(next.reposFilter) : null,
+      next.nextRunAt,
+      next.updatedAt,
+      id,
+      ...(this.userId === null ? [] : [this.userId]),
+    ];
     this.db
       .prepare(
         `UPDATE schedules SET
           name = ?, enabled = ?, cron_expression = ?, timezone = ?, repos_filter = ?,
           next_run_at = ?, updated_at = ?
-         WHERE id = ?`,
+         ${where}`,
       )
-      .run(
-        next.name,
-        next.enabled ? 1 : 0,
-        next.cronExpression,
-        next.timezone,
-        next.reposFilter ? JSON.stringify(next.reposFilter) : null,
-        next.nextRunAt,
-        next.updatedAt,
-        id,
-      );
+      .run(...args);
     return this.get(id) as ScheduleRow;
   }
 

@@ -83,7 +83,7 @@ export function createNotifierConfigRepo(
   const upsert = db.prepare(
     `INSERT INTO notifier_config (id, user_id, type, enabled, config_json, secret_ciphertext, secret_nonce)
      VALUES (?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(id) DO UPDATE SET type = excluded.type, enabled = excluded.enabled,
+     ON CONFLICT(user_id, id) DO UPDATE SET type = excluded.type, enabled = excluded.enabled,
        config_json = excluded.config_json, secret_ciphertext = excluded.secret_ciphertext, secret_nonce = excluded.secret_nonce`,
   );
   const del = db.prepare('DELETE FROM notifier_config WHERE id = ? AND user_id = ?');

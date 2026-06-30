@@ -115,7 +115,7 @@ export default function jiraRoutes(app: FastifyInstance, _opts: unknown, done: (
     authed((req) => {
       const userId = req.userId as number;
       const site = ensureSite(userId);
-      return site ? new JiraProjectRepository(app.db).listBySite(site.id) : [];
+      return site ? new JiraProjectRepository(app.db, userId).listBySite(site.id) : [];
     }),
   );
 
@@ -126,7 +126,7 @@ export default function jiraRoutes(app: FastifyInstance, _opts: unknown, done: (
       const site = ensureSite(userId);
       if (!site) return reply.code(412).send({ error: 'jira-not-connected' });
       const body = ProjectSelection.parse(req.body);
-      return new JiraProjectRepository(app.db).replaceForSite(site.id, body.projects);
+      return new JiraProjectRepository(app.db, userId).replaceForSite(site.id, body.projects);
     }),
   );
 

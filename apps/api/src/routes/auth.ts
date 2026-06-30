@@ -54,16 +54,29 @@ export default function authRoutes(app: FastifyInstance, _opts: unknown, done: (
     if ('error' in invite) return reply.code(400).send({ error: invite.error });
     const taken = app.db.prepare('SELECT 1 FROM app_user WHERE username = ?').get(body.username);
     if (taken) return reply.code(409).send({ error: 'username-taken' });
+    // Hash outside the transaction (argon2 is async); the transaction below
+    // atomically consumes the invite and creates the user so a token cannot be
+    // redeemed twice under concurrency.
     const hash = await hashPassword(body.password);
-    const info = app.db
-      .prepare(
-        'INSERT INTO app_user (username, password_hash, role, email, created_at) VALUES (?, ?, ?, ?, ?)',
-      )
-      .run(body.username, hash, invite.role, invite.email, app.now().toISOString());
-    const userId = Number(info.lastInsertRowid);
-    app.db
-      .prepare('UPDATE invite SET consumed_by = ?, consumed_at = ? WHERE id = ?')
-      .run(userId, app.now().toISOString(), invite.id);
+    const now = app.now().toISOString();
+    const claim = app.db.transaction((): number | null => {
+      const consumed = app.db
+        .prepare(
+          'UPDATE invite SET consumed_by = -1, consumed_at = ? WHERE id = ? AND consumed_by IS NULL',
+        )
+        .run(now, invite.id);
+      if (consumed.changes === 0) return null; // lost the race
+      const info = app.db
+        .prepare(
+          'INSERT INTO app_user (username, password_hash, role, email, created_at) VALUES (?, ?, ?, ?, ?)',
+        )
+        .run(body.username, hash, invite.role, invite.email, now);
+      const userId = Number(info.lastInsertRowid);
+      app.db.prepare('UPDATE invite SET consumed_by = ? WHERE id = ?').run(userId, invite.id);
+      return userId;
+    });
+    const userId = claim();
+    if (userId === null) return reply.code(400).send({ error: 'invalid-invite' });
     startSession(app, reply, userId);
     return reply.code(201).send({ ok: true });
   });

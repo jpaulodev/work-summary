@@ -66,13 +66,11 @@ export class JiraSiteRepository {
 
   insert(row: JiraSiteInsert): JiraSiteRow {
     const now = new Date().toISOString();
-    // The legacy email/encrypted_token/token_nonce columns are NOT NULL but
-    // unused under OAuth — write empty strings to satisfy the constraint.
     this.db
       .prepare(
         `INSERT INTO jira_site
-          (id, user_id, base_url, cloud_id, email, encrypted_token, token_nonce, developer_field_id, enabled, created_at, updated_at)
-         VALUES (?, ?, ?, ?, '', '', '', ?, ?, ?, ?)`,
+          (id, user_id, base_url, cloud_id, developer_field_id, enabled, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         row.id,
@@ -129,13 +127,18 @@ interface RawProject {
 }
 
 export class JiraProjectRepository {
-  constructor(private readonly db: SqliteDatabase) {}
+  constructor(
+    private readonly db: SqliteDatabase,
+    private readonly userId: number,
+  ) {}
 
   listBySite(siteId: string): JiraProjectRow[] {
     return (
       this.db
-        .prepare('SELECT * FROM jira_project WHERE site_id = ? ORDER BY project_key')
-        .all(siteId) as RawProject[]
+        .prepare(
+          'SELECT * FROM jira_project WHERE user_id = ? AND site_id = ? ORDER BY project_key',
+        )
+        .all(this.userId, siteId) as RawProject[]
     ).map((r) => ({
       id: r.id,
       siteId: r.site_id,
@@ -149,11 +152,13 @@ export class JiraProjectRepository {
     projects: { projectKey: string; projectName: string }[],
   ): JiraProjectRow[] {
     const tx = this.db.transaction((sid: string, projs: typeof projects) => {
-      this.db.prepare('DELETE FROM jira_project WHERE site_id = ?').run(sid);
+      this.db
+        .prepare('DELETE FROM jira_project WHERE user_id = ? AND site_id = ?')
+        .run(this.userId, sid);
       const stmt = this.db.prepare(
-        'INSERT INTO jira_project (site_id, project_key, project_name) VALUES (?, ?, ?)',
+        'INSERT INTO jira_project (user_id, site_id, project_key, project_name) VALUES (?, ?, ?, ?)',
       );
-      for (const p of projs) stmt.run(sid, p.projectKey, p.projectName);
+      for (const p of projs) stmt.run(this.userId, sid, p.projectKey, p.projectName);
     });
     tx(siteId, projects);
     return this.listBySite(siteId);
