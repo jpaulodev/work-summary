@@ -11,8 +11,9 @@ export default function bootstrapRoutes(
 ): void {
   app.post('/bootstrap', async (req, reply) => {
     const body = BodySchema.parse(req.body);
-    // Bootstrap creates the first user, who becomes the admin. Once any user
-    // exists, further accounts are created via invites (see /auth/register).
+    // Bootstrap creates the first user. It is optional now that signup is open
+    // (see POST /auth/register) — it just lets the first account be made via the
+    // CLI/curl before the web is up. Once any user exists it refuses.
     const exists = app.db.prepare('SELECT 1 FROM app_user LIMIT 1').get();
     if (exists) return reply.code(409).send({ error: 'Already bootstrapped' });
     const hash = await hashPassword(body.password);

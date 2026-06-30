@@ -8,20 +8,18 @@ import {
   ListChecks,
   LogOut,
   Settings,
-  Users,
 } from 'lucide-react';
 import { useMe, useLogout } from '../lib/auth';
 import { Button } from '../components/ui/button';
 import { cn } from '../lib/utils';
 
 const NAV = [
-  { to: '/', label: 'Dashboard', icon: LayoutGrid, end: true, adminOnly: false },
-  { to: '/sources', label: 'Sources', icon: Github, end: false, adminOnly: false },
-  { to: '/notifications', label: 'Notifications', icon: Bell, end: false, adminOnly: false },
-  { to: '/runs', label: 'Runs', icon: ListChecks, end: false, adminOnly: false },
-  { to: '/schedules', label: 'Schedules', icon: CalendarClock, end: false, adminOnly: false },
-  { to: '/team', label: 'Team', icon: Users, end: false, adminOnly: true },
-  { to: '/settings', label: 'Settings', icon: Settings, end: false, adminOnly: false },
+  { to: '/', label: 'Dashboard', icon: LayoutGrid, end: true },
+  { to: '/sources', label: 'Sources', icon: Github, end: false },
+  { to: '/notifications', label: 'Notifications', icon: Bell, end: false },
+  { to: '/runs', label: 'Runs', icon: ListChecks, end: false },
+  { to: '/schedules', label: 'Schedules', icon: CalendarClock, end: false },
+  { to: '/settings', label: 'Settings', icon: Settings, end: false },
 ];
 
 export default function Layout(): JSX.Element {
@@ -51,26 +49,24 @@ export default function Layout(): JSX.Element {
         </div>
 
         <nav className="mt-6 flex flex-1 flex-col gap-1">
-          {NAV.filter((n) => !n.adminOnly || me.data?.role === 'admin').map(
-            ({ to, label, icon: Icon, end }) => (
-              <NavLink
-                key={to}
-                to={to}
-                end={end}
-                className={({ isActive }) =>
-                  cn(
-                    'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all',
-                    isActive
-                      ? 'bg-accent text-accent-foreground'
-                      : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-                  )
-                }
-              >
-                <Icon className="h-4 w-4" />
-                {label}
-              </NavLink>
-            ),
-          )}
+          {NAV.map(({ to, label, icon: Icon, end }) => (
+            <NavLink
+              key={to}
+              to={to}
+              end={end}
+              className={({ isActive }) =>
+                cn(
+                  'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all',
+                  isActive
+                    ? 'bg-accent text-accent-foreground'
+                    : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                )
+              }
+            >
+              <Icon className="h-4 w-4" />
+              {label}
+            </NavLink>
+          ))}
         </nav>
 
         <div className="mt-auto border-t border-border pt-3">

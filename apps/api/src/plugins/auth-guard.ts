@@ -50,16 +50,3 @@ export function authed(handler: RouteHandlerMethod): RouteHandlerMethod {
     return handler.call(this, req, reply);
   };
 }
-
-/** Like authed(), but additionally requires the current user to be an admin. */
-export function adminOnly(handler: RouteHandlerMethod): RouteHandlerMethod {
-  return authed(function adminHandler(this: FastifyInstance, req, reply) {
-    const server = req.server as FastifyInstance & { db: SqliteDatabase };
-    const row = server.db.prepare('SELECT role FROM app_user WHERE id = ?').get(req.userId) as
-      { role: string } | undefined;
-    if (row?.role !== 'admin') {
-      return reply.code(403).send({ error: 'admin-only' });
-    }
-    return handler.call(this, req, reply);
-  });
-}

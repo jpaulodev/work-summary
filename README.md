@@ -15,9 +15,10 @@ you can triage and reply without leaving the page.
   Every enabled channel receives the digest; one failing channel never blocks the others.
 - **Two ways to run** — a zero-server **CLI** (great for cron), or the **web dashboard +
   REST API** with login, an in-process scheduler, and one-click triage.
-- **Multi-user** — invite teammates from the dashboard; each person connects their own
-  GitHub/JIRA and sees only their own comments, schedules, and runs. The first user is the
-  admin.
+- **Multi-user, self-service** — anyone creates their own account at `/register`; each
+  person connects their own GitHub/JIRA and sees only their own comments, schedules, and
+  runs. No admin or invites — every account is an equal, isolated workspace. Lock signups
+  with `DISABLE_REGISTRATION=true` once everyone has registered.
 - **Reply from the dashboard** — answer a GitHub or JIRA comment inline; the reply is
   posted upstream and the comment is marked addressed.
 - **Secure by default** — all secrets (GitHub/JIRA tokens, SMTP creds, webhook URLs) are
@@ -121,25 +122,21 @@ NODE_ENV=production node apps/api/dist/bin.js          # -> http://localhost:${P
 > click; no token is pasted. Your GitHub login (used by the matching rules) is read from
 > the OAuth profile, so `GITHUB_LOGIN` is no longer needed for the API.
 
-On first start the API prints a `curl` command to create your login. Run it (or use any
-client):
+Open **http://127.0.0.1:3001** and click **Create an account** — signup is open and
+self-service, so the first visit creates your login and logs you straight in. (Prefer the
+command line, or scripting the first account? `POST /api/auth/bootstrap` with
+`{"username","password"}` still works and is equivalent.) Once everyone has registered you
+can set `DISABLE_REGISTRATION=true` to lock further signups.
 
-```bash
-curl -X POST http://127.0.0.1:3001/api/auth/bootstrap \
-  -H 'content-type: application/json' \
-  -d '{"username":"you","password":"a-strong-password"}'   # password min 8 chars
-```
+After logging in, configure everything from the sidebar:
 
-Open **http://127.0.0.1:3001**, log in, then configure everything from the sidebar:
-
-| Screen                  | What you set up                                                                                                                                                                                                                 |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Sources**             | **Connect GitHub** with OAuth (one click — no token pasting), list `owner/repo` entries, toggle the five matching rules, configure the bot filter.                                                                              |
-| **JIRA** (Sources area) | **Connect JIRA** with OAuth (Atlassian 3LO), then discover and pick projects. Scans then include JIRA issue comments.                                                                                                           |
-| **Notifications**       | Add one or more channels: **Email (SMTP)**, **Slack** (incoming webhook), or **Microsoft Teams** (incoming webhook). Each has a **Send test** button. Every enabled channel receives the digest.                                |
-| **Schedules**           | Create cron schedules (with timezone, optional repo filter) so scans run automatically — this replaces external cron.                                                                                                           |
-| **Team** (admin only)   | Invite teammates: create an invite, share the link, and they register their own account at `/register?invite=…`. Each member's sources, comments, schedules, and runs are isolated.                                             |
-| **Dashboard**           | Triage matched comments: filter by status (pending / addressed / resolved / snoozed), mark/snooze/reopen, **Reply** inline (posts to GitHub/JIRA and marks the comment addressed), and **Run now** to trigger a scan on demand. |
+| Screen                  | What you set up                                                                                                                                                                                                                                            |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Sources**             | **Connect GitHub** with OAuth (one click — no token pasting), list `owner/repo` entries, toggle the five matching rules, configure the bot filter.                                                                                                         |
+| **JIRA** (Sources area) | **Connect JIRA** with OAuth (Atlassian 3LO), then discover and pick projects. Scans then include JIRA issue comments.                                                                                                                                      |
+| **Notifications**       | Add one or more channels: **Email (SMTP)**, **Slack** (incoming webhook), or **Microsoft Teams** (incoming webhook). Each has a **Send test** button. Every enabled channel receives the digest.                                                           |
+| **Schedules**           | Create cron schedules (with timezone, optional repo filter) so scans run automatically — this replaces external cron.                                                                                                                                      |
+| **Dashboard**           | Triage matched comments: filter by status (pending / addressed / resolved / snoozed), mark/snooze/reopen, **Reply** inline (posts to GitHub/JIRA and marks the comment addressed), and **Run now** (with a live progress bar) to trigger a scan on demand. |
 
 > The GitHub/JIRA token used for replies must have **write** scope on the repo/issue. A
 > reply that fails on a missing scope surfaces a clear banner and leaves the comment's
@@ -221,6 +218,7 @@ auto-load it — or export them as real environment variables. See
 | `WEB_PORT`                                              | web       | Vite dev-server port (default `5173`).                                                                            |
 | `HOST`                                                  | API       | Bind address (default `127.0.0.1`). Set `0.0.0.0` to reach the dashboard from other machines on the network.      |
 | `COOKIE_SECURE`                                         | API       | Override the session-cookie `Secure` flag (`true`/`false`). Default: secure only when `PUBLIC_BASE_URL` is https. |
+| `DISABLE_REGISTRATION`                                  | API       | Set `true` to lock self-service signup (`POST /api/auth/register` returns 403). Default: open.                    |
 | `NODE_ENV=production`                                   | API       | Also serve the built dashboard from the API origin.                                                               |
 | `XDG_STATE_HOME`                                        | CLI + API | Override the state dir (default `~/.local/state`); both share `…/work-summary/state.db`.                          |
 
@@ -275,9 +273,9 @@ apps/cli  ->  github-source, jira-source ->  core      apps/api ->  auth, oauth,
    `->  core
 ```
 
-Auth model: username/password app login (argon2id) + per-user **OAuth** connections for
-GitHub and JIRA. Every per-user table is keyed by `user_id`; admins invite teammates from
-the Team screen.
+Auth model: open self-service username/password signup (argon2id) + per-user **OAuth**
+connections for GitHub and JIRA. Every per-user table is keyed by `user_id`, so each
+account is a fully isolated workspace; signups can be locked with `DISABLE_REGISTRATION`.
 
 ## License
 
