@@ -230,16 +230,20 @@ Toggle each per source (UI Sources screen, or `sources.github.rules` in YAML):
 
 ## Architecture
 
-Six phases, all shipped (see [`docs/superpowers/specs/`](docs/superpowers/specs) for each
+Seven phases, all shipped (see [`docs/superpowers/specs/`](docs/superpowers/specs) for each
 design). The CLI and API share the same `core` matching engine, `storage` (SQLite/WAL),
-and source/notifier packages.
+and source/notifier packages; the API adds OAuth (`oauth`) and per-user data isolation.
 
 ```
-apps/cli  ->  github-source, jira-source ->  core      apps/api ->  auth, config-db, scheduler,
+apps/cli  ->  github-source, jira-source ->  core      apps/api ->  auth, oauth, config-db, scheduler,
    |      ->  notifiers (smtp/slack/teams) ->  core        |          sources, notifiers, storage
    |      ->  storage                       ->  core        `->  apps/web (premium React dashboard)
    `->  core
 ```
+
+Auth model: username/password app login (argon2id) + per-user **OAuth** connections for
+GitHub and JIRA. Every per-user table is keyed by `user_id`; admins invite teammates from
+the Team screen.
 
 ## License
 
