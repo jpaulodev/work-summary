@@ -1,7 +1,7 @@
 # work-summary
 
 Stop losing track of comments that need your reply. **work-summary** scans your GitHub
-(and JIRA) activity, finds the PR/issue comments that are actually waiting on *you*, and
+(and JIRA) activity, finds the PR/issue comments that are actually waiting on _you_, and
 surfaces them — as a daily email/Slack/Teams digest, or in a premium web dashboard where
 you can triage and reply without leaving the page.
 
@@ -98,12 +98,20 @@ nvm use 20 && pnpm build
 
 # 2. Required env for the API
 export MASTER_PASSPHRASE='a-long-random-passphrase'   # derives the encryption + session key
-export GITHUB_LOGIN='your-github-username'            # REQUIRED so matching knows who "you" are
-                                                      # (mentions/assignee/PR-author match against this)
 
-# 3. Start the API. In production it also serves the built dashboard from one origin.
+# 3. GitHub OAuth app credentials (register one at https://github.com/settings/developers
+#    with callback URL <PUBLIC_BASE_URL>/api/oauth/github/callback).
+export GITHUB_OAUTH_CLIENT_ID='Iv1.xxxxxxxx'
+export GITHUB_OAUTH_CLIENT_SECRET='xxxxxxxx'
+export PUBLIC_BASE_URL='http://127.0.0.1:3001'        # base for OAuth redirects (default shown)
+
+# 4. Start the API. In production it also serves the built dashboard from one origin.
 NODE_ENV=production node apps/api/dist/bin.js          # -> http://127.0.0.1:3001
 ```
+
+> The dashboard authenticates GitHub via **OAuth** — you connect your account with a
+> click; no token is pasted. Your GitHub login (used by the matching rules) is read from
+> the OAuth profile, so `GITHUB_LOGIN` is no longer needed for the API.
 
 On first start the API prints a `curl` command to create your login. Run it (or use any
 client):
@@ -116,13 +124,13 @@ curl -X POST http://127.0.0.1:3001/api/auth/bootstrap \
 
 Open **http://127.0.0.1:3001**, log in, then configure everything from the sidebar:
 
-| Screen | What you set up |
-| --- | --- |
-| **Sources** | Paste a GitHub token (write-only — never shown back), list `owner/repo` entries, toggle the five matching rules, configure the bot filter. |
-| **JIRA** (Sources area) | Add a JIRA site (base URL, email, API token), discover and pick projects. Scans then include JIRA issue comments. |
-| **Notifications** | Add one or more channels: **Email (SMTP)**, **Slack** (incoming webhook), or **Microsoft Teams** (incoming webhook). Each has a **Send test** button. Every enabled channel receives the digest. |
-| **Schedules** | Create cron schedules (with timezone, optional repo filter) so scans run automatically — this replaces external cron. |
-| **Dashboard** | Triage matched comments: filter by status (pending / addressed / resolved / snoozed), mark/snooze/reopen, **Reply** inline (posts to GitHub/JIRA and marks the comment addressed), and **Run now** to trigger a scan on demand. |
+| Screen                  | What you set up                                                                                                                                                                                                                 |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Sources**             | **Connect GitHub** with OAuth (one click — no token pasting), list `owner/repo` entries, toggle the five matching rules, configure the bot filter.                                                                              |
+| **JIRA** (Sources area) | Add a JIRA site (base URL, email, API token), discover and pick projects. Scans then include JIRA issue comments.                                                                                                               |
+| **Notifications**       | Add one or more channels: **Email (SMTP)**, **Slack** (incoming webhook), or **Microsoft Teams** (incoming webhook). Each has a **Send test** button. Every enabled channel receives the digest.                                |
+| **Schedules**           | Create cron schedules (with timezone, optional repo filter) so scans run automatically — this replaces external cron.                                                                                                           |
+| **Dashboard**           | Triage matched comments: filter by status (pending / addressed / resolved / snoozed), mark/snooze/reopen, **Reply** inline (posts to GitHub/JIRA and marks the comment addressed), and **Run now** to trigger a scan on demand. |
 
 > The GitHub/JIRA token used for replies must have **write** scope on the repo/issue. A
 > reply that fails on a missing scope surfaces a clear banner and leaves the comment's
@@ -134,12 +142,17 @@ Run the API and the Vite dev server separately (Vite proxies `/api` → `:3001`)
 
 ```bash
 # terminal 1
-export MASTER_PASSPHRASE='dev-passphrase' GITHUB_LOGIN='your-github-username'
+export MASTER_PASSPHRASE='dev-passphrase'
+export GITHUB_OAUTH_CLIENT_ID=... GITHUB_OAUTH_CLIENT_SECRET=...
+export PUBLIC_BASE_URL='http://localhost:5173'  # OAuth lands on Vite, which proxies /api → :3001
 node apps/api/dist/bin.js                       # :3001 (omit NODE_ENV=production)
 
 # terminal 2
 pnpm --filter @work-summary/web dev             # :5173
 ```
+
+In dev, register the GitHub OAuth callback as `http://localhost:5173/api/oauth/github/callback`
+(Vite proxies it to the API).
 
 An end-to-end smoke test lives in [`e2e/`](e2e) (Playwright; run manually against a
 seeded DB).
@@ -160,15 +173,16 @@ Toggle each per source (UI Sources screen, or `sources.github.rules` in YAML):
 
 ## Environment variables
 
-| Var | Used by | Purpose |
-| --- | --- | --- |
-| `GITHUB_TOKEN` | CLI | GitHub PAT (`repo` + `read:user`). In the dashboard the token is stored encrypted in the DB instead. |
-| `SMTP_USER` / `SMTP_PASS` | CLI | SMTP credentials referenced from the YAML config. |
-| `MASTER_PASSPHRASE` | API | Derives the AES-256-GCM master key and session secret. Required to start the API. Use the same value every run. |
-| `GITHUB_LOGIN` | API | Your GitHub username — matching uses it to decide what's directed at you. Without it, identity-based rules match nothing. |
-| `PORT` | API | API port (default `3001`). |
-| `NODE_ENV=production` | API | Also serve the built dashboard from the API origin. |
-| `XDG_STATE_HOME` | CLI + API | Override the state dir (default `~/.local/state`); both share `…/work-summary/state.db`. |
+| Var                                                     | Used by   | Purpose                                                                                                         |
+| ------------------------------------------------------- | --------- | --------------------------------------------------------------------------------------------------------------- |
+| `GITHUB_TOKEN`                                          | CLI       | GitHub PAT (`repo` + `read:user`). In the dashboard the token is stored encrypted in the DB instead.            |
+| `SMTP_USER` / `SMTP_PASS`                               | CLI       | SMTP credentials referenced from the YAML config.                                                               |
+| `MASTER_PASSPHRASE`                                     | API       | Derives the AES-256-GCM master key and session secret. Required to start the API. Use the same value every run. |
+| `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET` | API       | GitHub OAuth App credentials for the "Connect GitHub" flow.                                                     |
+| `PUBLIC_BASE_URL`                                       | API       | Base URL used to build OAuth redirect URIs (default `http://127.0.0.1:3001`).                                   |
+| `PORT`                                                  | API       | API port (default `3001`).                                                                                      |
+| `NODE_ENV=production`                                   | API       | Also serve the built dashboard from the API origin.                                                             |
+| `XDG_STATE_HOME`                                        | CLI + API | Override the state dir (default `~/.local/state`); both share `…/work-summary/state.db`.                        |
 
 ## Exit codes (CLI)
 
@@ -187,11 +201,14 @@ Toggle each per source (UI Sources screen, or `sources.github.rules` in YAML):
 - **`better-sqlite3` / `argon2` fail to build (`'climits' file not found`, node-gyp errors)** —
   you're on a too-new Node. Run `nvm use 20` and reinstall: `pnpm install`.
 - **`MASTER_PASSPHRASE env var is required to start the API`** — export it before starting
-  the API, and use the *same* passphrase each time (it derives the key that decrypts your
+  the API, and use the _same_ passphrase each time (it derives the key that decrypts your
   stored secrets).
-- **Dashboard scans find nothing even though comments exist** — set `GITHUB_LOGIN`; without
-  it the identity rules (mentioned/assignee/PR author) can't match. Also confirm the repo is
-  listed and at least one rule is enabled on the Sources screen.
+- **"Connect GitHub" shows "OAuth is not configured"** — set `GITHUB_OAUTH_CLIENT_ID` and
+  `GITHUB_OAUTH_CLIENT_SECRET` (and `PUBLIC_BASE_URL`) before starting the API, and make sure
+  the OAuth App's callback URL matches `<PUBLIC_BASE_URL>/api/oauth/github/callback`.
+- **Dashboard scans find nothing even though comments exist** — connect GitHub on the Sources
+  screen (the matching login comes from the OAuth profile), confirm the repo is listed, and
+  enable at least one rule.
 - **`config error: Unresolved environment variables: GITHUB_TOKEN`** (CLI) — export the var.
 - **`SmtpError: connect ECONNREFUSED`** — check host/port and outbound SMTP access.
 - **`401 Unauthorized` from GitHub** — regenerate the token with `repo` + `read:user`.

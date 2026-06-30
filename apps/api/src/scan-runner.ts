@@ -3,7 +3,11 @@ import { runScan, type Config } from '@work-summary/cli';
 import { createOctokit, GithubSource, type Source } from '@work-summary/github-source';
 import { JiraSource } from '@work-summary/jira-source';
 import { decryptSecret } from '@work-summary/auth';
-import { createSourceConfigRepo, createNotifierConfigRepo } from '@work-summary/config-db';
+import {
+  createSourceConfigRepo,
+  createNotifierConfigRepo,
+  createOAuthConnectionService,
+} from '@work-summary/config-db';
 import {
   createCommentsRepo,
   createRunsRepo,
@@ -21,7 +25,7 @@ import { buildNotifier, buildCompositeNotifier } from './notifier-factory.js';
  */
 function buildCompositeSource(
   app: FastifyInstance,
-  githubSource: GithubSource,
+  githubSource: GithubSource | null,
   since: Date,
   lookbackDays: number,
 ): Source {
@@ -31,7 +35,8 @@ function buildCompositeSource(
   return {
     id: 'github',
     fetchPendingComments: async (opts): Promise<PendingComment[]> => {
-      const github = await githubSource.fetchPendingComments(opts);
+      // GitHub is skipped entirely when no OAuth connection exists.
+      const github = githubSource ? await githubSource.fetchPendingComments(opts) : [];
       if (sites.length === 0) return github;
       // JIRA is best-effort: a failing site/token must not discard the GitHub
       // results already fetched or fail the whole scan run.
@@ -74,8 +79,17 @@ export async function triggerScan(
   running = true;
   try {
     const logger = pino({ level: 'info' });
-    const gh = createSourceConfigRepo(app.db, app.masterKey).getGithub();
-    if (!gh) throw new Error('No source config in DB');
+    // Single-user today; Phase 7c scopes this to the requesting/owning user.
+    const userId = 1;
+    const ghCfg = createSourceConfigRepo(app.db).getGithub();
+    const ghTokens = createOAuthConnectionService(app.db, app.masterKey).getTokens(
+      userId,
+      'github',
+    );
+    const sites = new JiraSiteRepository(app.db).list();
+    if (!ghTokens && sites.length === 0) {
+      throw new Error('no source connected: connect GitHub or add a JIRA site');
+    }
 
     // Build a notifier per enabled config (smtp/slack/teams) and fan out to all.
     const notifRepo = createNotifierConfigRepo(app.db, app.masterKey);
@@ -93,10 +107,28 @@ export async function triggerScan(
       fulls.find((f) => f.type === 'smtp')?.subjectTemplate ??
       '[work-summary] {{count}} - {{date}}';
 
-    const repos = opts.reposFilter && opts.reposFilter.length > 0 ? opts.reposFilter : gh.repos;
+    const DEFAULT_RULES = {
+      authorOfPrUnanswered: true,
+      mentioned: true,
+      repliedBeforeThenFollowup: true,
+      assignee: true,
+      changesRequested: true,
+    };
+    const DEFAULT_FILTERS = { excludeBots: true, botWhitelist: [] as string[] };
+    // Repos/rules/filters only matter when GitHub is connected; otherwise the
+    // GitHub side contributes nothing and JIRA carries the scan.
+    const ghRepos = ghTokens ? (ghCfg?.repos ?? []) : [];
+    const repos = opts.reposFilter && opts.reposFilter.length > 0 ? opts.reposFilter : ghRepos;
     const config: Config = {
-      user: { githubLogin: process.env.GITHUB_LOGIN ?? '' },
-      sources: { github: { token: gh.token, repos, rules: gh.rules, filters: gh.filters } },
+      user: { githubLogin: ghTokens?.accountLogin ?? '' },
+      sources: {
+        github: {
+          token: ghTokens?.accessToken ?? '',
+          repos,
+          rules: ghCfg?.rules ?? DEFAULT_RULES,
+          filters: ghCfg?.filters ?? DEFAULT_FILTERS,
+        },
+      },
       scan: { lookbackDays: 7, concurrency: 3 },
       // A single synthetic enabled entry carries the subject template; the actual
       // delivery goes to the composite notifier in deps below.
@@ -114,7 +146,9 @@ export async function triggerScan(
       logging: { level: 'info', file: '/tmp/api-scan.log' },
     };
 
-    const githubSource = new GithubSource(createOctokit({ token: gh.token }));
+    const githubSource = ghTokens
+      ? new GithubSource(createOctokit({ token: ghTokens.accessToken }))
+      : null;
     const since = new Date(Date.now() - config.scan.lookbackDays * 24 * 60 * 60 * 1000);
     const result = await runScan({
       config,

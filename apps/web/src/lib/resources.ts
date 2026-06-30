@@ -6,7 +6,7 @@ import type { GithubSource, MatchRules, NotifierItem, RunRow, ScanStatus, Schedu
 export function useSources() {
   return useQuery({
     queryKey: ['sources'],
-    queryFn: () => api.get<{ github: GithubSource | null }>('/sources'),
+    queryFn: () => api.get<{ github: GithubSource }>('/sources'),
   });
 }
 
@@ -15,11 +15,18 @@ export function useUpdateSources() {
   return useMutation({
     mutationFn: (input: {
       enabled?: boolean;
-      token?: string;
       repos?: string[];
       rules?: MatchRules;
       filters?: { excludeBots: boolean; botWhitelist: string[] };
     }) => api.put<{ ok: boolean }>('/sources/github', input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['sources'] }),
+  });
+}
+
+export function useDisconnectOAuth() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (provider: 'github' | 'jira') => api.del<{ ok: boolean }>(`/oauth/${provider}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['sources'] }),
   });
 }

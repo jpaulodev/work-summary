@@ -56,12 +56,17 @@ export interface BotFilter {
   botWhitelist: string[];
 }
 
+export interface OAuthConnection {
+  accountLogin: string | null;
+  connectedAt: string;
+}
+
 export interface GithubSource {
   enabled: boolean;
   repos: string[];
-  rules: MatchRules;
-  filters: BotFilter;
-  hasToken: boolean;
+  rules: MatchRules | null;
+  filters: BotFilter | null;
+  connection: OAuthConnection | null;
 }
 
 export type NotifierType = 'smtp' | 'slack' | 'teams';

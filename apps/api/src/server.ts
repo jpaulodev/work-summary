@@ -16,6 +16,7 @@ import scanRoutes from './routes/scan.js';
 import schedulesRoutes from './routes/schedules.js';
 import jiraRoutes from './routes/jira.js';
 import repliesRoutes from './routes/replies.js';
+import oauthRoutes from './routes/oauth.js';
 import { triggerScan } from './scan-runner.js';
 import {
   ScheduleRepository,
@@ -94,6 +95,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(schedulesRoutes, { prefix: '/api' });
   await app.register(jiraRoutes, { prefix: '/api' });
   await app.register(repliesRoutes, { prefix: '/api' });
+  await app.register(oauthRoutes, { prefix: '/api' });
 
   if (process.env.NODE_ENV === 'production') {
     const webDist = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'web', 'dist');

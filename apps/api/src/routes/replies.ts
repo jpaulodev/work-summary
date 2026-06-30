@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { createOctokit, postGithubReply } from '@work-summary/github-source';
 import { JiraClient, postJiraReply } from '@work-summary/jira-source';
-import { createSourceConfigRepo } from '@work-summary/config-db';
+import { createOAuthConnectionService } from '@work-summary/config-db';
 import { decryptSecret } from '@work-summary/auth';
 import { CommentReplyRepository, JiraSiteRepository } from '@work-summary/storage';
 import { authed } from '../plugins/auth-guard.js';
@@ -48,14 +48,14 @@ export default function repliesRoutes(
                 'This comment was collected before reply support was added; re-scan to enable replying.',
             });
           }
-          const gh = createSourceConfigRepo(app.db, app.masterKey).getGithub();
-          if (!gh) {
+          const tokens = createOAuthConnectionService(app.db, app.masterKey).getTokens(1, 'github');
+          if (!tokens) {
             return reply
               .code(412)
-              .send({ error: 'no-source', message: 'No GitHub source is configured.' });
+              .send({ error: 'no-source', message: 'GitHub is not connected.' });
           }
           const r = await postGithubReply({
-            octokit: createOctokit({ token: gh.token }),
+            octokit: createOctokit({ token: tokens.accessToken }),
             commentUrl: comment.comment_url,
             body,
           });

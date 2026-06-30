@@ -13,3 +13,5 @@ export { CommentReplyRepository } from './comment-reply-repo.js';
 export type { CommentReplyRow } from './comment-reply-repo.js';
 export { JiraSiteRepository, JiraProjectRepository } from './jira-repo.js';
 export type { JiraSiteRow, JiraSiteInsert, JiraSitePatch, JiraProjectRow } from './jira-repo.js';
+export { OAuthConnectionRepository } from './oauth-repo.js';
+export type { OAuthProvider, OAuthConnectionRow, OAuthConnectionUpsert } from './oauth-repo.js';

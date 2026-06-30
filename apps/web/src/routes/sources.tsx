@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Check, Loader2, Save } from 'lucide-react';
-import { useSources, useUpdateSources } from '../lib/resources';
+import { Check, Github, Loader2, Plug, Save, Unplug, AlertTriangle } from 'lucide-react';
+import { useSources, useUpdateSources, useDisconnectOAuth } from '../lib/resources';
 import { Button } from '../components/ui/button';
-import { Input, Label, Textarea } from '../components/ui/input';
+import { Label, Textarea } from '../components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { JiraPanel } from '../components/jira-panel';
 import type { MatchRules } from '../lib/types';
@@ -36,22 +36,42 @@ const DEFAULT_RULES: MatchRules = {
   changesRequested: true,
 };
 
+/** Read ?connected / ?oauth_error from the OAuth redirect, then clean the URL. */
+function useOAuthRedirectResult(): { connected: string | null; error: string | null } {
+  const [result] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return { connected: params.get('connected'), error: params.get('oauth_error') };
+  });
+  useEffect(() => {
+    if (result.connected || result.error) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('connected');
+      url.searchParams.delete('oauth_error');
+      window.history.replaceState({}, '', url.toString());
+    }
+  }, [result]);
+  return result;
+}
+
 export default function Sources(): JSX.Element {
   const sources = useSources();
   const update = useUpdateSources();
+  const disconnect = useDisconnectOAuth();
+  const oauthResult = useOAuthRedirectResult();
   const [reposText, setReposText] = useState('');
-  const [token, setToken] = useState('');
   const [rules, setRules] = useState<MatchRules>(DEFAULT_RULES);
   const [excludeBots, setExcludeBots] = useState(true);
   const [saved, setSaved] = useState(false);
   const [tab, setTab] = useState<'github' | 'jira'>('github');
 
+  const connection = sources.data?.github.connection ?? null;
+
   useEffect(() => {
     const g = sources.data?.github;
     if (g) {
       setReposText(g.repos.join('\n'));
-      setRules(g.rules);
-      setExcludeBots(g.filters.excludeBots);
+      if (g.rules) setRules(g.rules);
+      if (g.filters) setExcludeBots(g.filters.excludeBots);
     }
   }, [sources.data]);
 
@@ -66,15 +86,12 @@ export default function Sources(): JSX.Element {
         enabled: true,
         repos,
         rules,
-        filters: { excludeBots, botWhitelist: sources.data?.github?.filters.botWhitelist ?? [] },
-        ...(token.trim() ? { token: token.trim() } : {}),
-      },
-      {
-        onSuccess: () => {
-          setSaved(true);
-          setToken('');
+        filters: {
+          excludeBots,
+          botWhitelist: sources.data?.github.filters?.botWhitelist ?? [],
         },
       },
+      { onSuccess: () => setSaved(true) },
     );
   };
 
@@ -110,6 +127,20 @@ export default function Sources(): JSX.Element {
         ))}
       </div>
 
+      {oauthResult.connected === 'github' && (
+        <div className="mb-4 flex items-center gap-2 rounded-md border border-success/30 bg-success/10 p-3 text-sm text-success">
+          <Check className="h-4 w-4" /> GitHub connected.
+        </div>
+      )}
+      {oauthResult.error && (
+        <div className="mb-4 flex items-center gap-2 rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-danger">
+          <AlertTriangle className="h-4 w-4" />
+          {oauthResult.error === 'oauth-not-configured' || oauthResult.error === 'config'
+            ? 'OAuth is not configured on the server. Ask your operator to set the GitHub OAuth env vars.'
+            : `Could not connect (${oauthResult.error}). Please try again.`}
+        </div>
+      )}
+
       {tab === 'jira' ? (
         <JiraPanel />
       ) : (
@@ -118,23 +149,43 @@ export default function Sources(): JSX.Element {
             <CardHeader>
               <CardTitle>GitHub</CardTitle>
               <CardDescription>
-                Token is write-only. Leave blank to keep the current token.
-                {sources.data?.github?.hasToken && ' A token is currently set.'}
+                Connect your GitHub account with OAuth. We never store a password — only an
+                encrypted access token.
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
-              <div>
-                <Label htmlFor="token">Personal access token</Label>
-                <Input
-                  id="token"
-                  type="password"
-                  placeholder={
-                    sources.data?.github?.hasToken ? '•••••••••• (unchanged)' : 'ghp_...'
-                  }
-                  value={token}
-                  onChange={(e) => setToken(e.target.value)}
-                />
-              </div>
+              {connection ? (
+                <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/40 p-3">
+                  <span className="inline-flex items-center gap-2 text-sm">
+                    <Github className="h-4 w-4" />
+                    Connected as{' '}
+                    <span className="font-semibold">@{connection.accountLogin ?? 'unknown'}</span>
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={disconnect.isPending}
+                    onClick={() => disconnect.mutate('github')}
+                  >
+                    {disconnect.isPending ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Unplug className="h-3.5 w-3.5" />
+                    )}
+                    Disconnect
+                  </Button>
+                </div>
+              ) : (
+                <a
+                  href="/api/oauth/github/start"
+                  className={cn(
+                    'inline-flex h-10 items-center justify-center gap-2 self-start rounded-md px-4 text-sm font-medium transition-all',
+                    'bg-primary text-primary-foreground shadow-soft hover:brightness-110',
+                  )}
+                >
+                  <Plug className="h-4 w-4" /> Connect GitHub
+                </a>
+              )}
               <div>
                 <Label htmlFor="repos">Repositories (one per line)</Label>
                 <Textarea
