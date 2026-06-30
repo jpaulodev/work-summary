@@ -94,6 +94,27 @@ describe('migration 0009 (multi-user) data preservation', () => {
     });
   });
 
+  it('survives orphaned rows left by a foreign_keys-OFF delete (no crash)', () => {
+    const db = seededDb();
+    // Simulate the real failure: jira_site deleted via the sqlite3 CLI (FK OFF),
+    // leaving an orphaned jira_project; and an orphaned comment_reply.
+    db.pragma('foreign_keys = OFF');
+    db.prepare("DELETE FROM jira_site WHERE id = 'cloud-1'").run();
+    db.prepare(
+      "INSERT INTO comment_reply (comment_id, body, sent_at, source) VALUES ('ghost', 'x', '', 'github')",
+    ).run();
+    db.pragma('foreign_keys = ON');
+
+    // The migration must NOT throw on this dirty DB...
+    expect(() =>
+      db.exec(readFileSync(join(MIGRATIONS, '0009_multiuser.sql'), 'utf8')),
+    ).not.toThrow();
+    // ...orphans are dropped, valid rows survive.
+    expect(db.prepare('SELECT COUNT(*) AS n FROM jira_project').get()).toEqual({ n: 0 });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM comment_reply').get()).toEqual({ n: 1 });
+    expect(db.prepare('SELECT comment_id FROM comment_reply').get()).toEqual({ comment_id: 'c1' });
+  });
+
   it('lets two users share a jira cloud id (composite PK)', () => {
     const db = seededDb();
     db.exec(readFileSync(join(MIGRATIONS, '0009_multiuser.sql'), 'utf8'));
