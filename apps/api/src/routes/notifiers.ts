@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { createNotifierConfigRepo, type NotifierInput } from '@work-summary/config-db';
-import type { NotificationPayload } from '@work-summary/notifiers';
+import { SmtpNotifier, type NotificationPayload } from '@work-summary/notifiers';
 import { authed } from '../plugins/auth-guard.js';
 import { buildNotifier } from '../notifier-factory.js';
 
@@ -28,7 +28,14 @@ const SlackCreate = z.object({
 const TeamsCreate = z.object({
   type: z.literal('teams'),
   name: z.string().min(1).max(64),
-  webhookUrl: z.string().url(),
+  // Restrict to known Teams / Power Automate webhook hosts to limit SSRF surface.
+  webhookUrl: z
+    .string()
+    .url()
+    .regex(
+      /^https:\/\/([a-z0-9-]+\.)*(office\.com|azure\.com|powerplatform\.com)\//i,
+      'must be a Microsoft Teams or Power Automate webhook',
+    ),
 });
 const CreateSchema = z.discriminatedUnion('type', [SmtpCreate, SlackCreate, TeamsCreate]);
 
@@ -108,11 +115,22 @@ export default function notifiersRoutes(
 
   app.put(
     '/notifiers/:id',
-    authed((req) => {
+    authed((req, reply) => {
       const { id } = z.object({ id: z.string() }).parse(req.params);
+      const repo = createNotifierConfigRepo(app.db, app.masterKey);
+      const existing = repo.get(id);
       const body = PutSchema.parse(req.body);
+      // For an existing record, reject fields that do not belong to its type so a
+      // PUT cannot corrupt a webhook record with SMTP creds (or vice versa). PUT
+      // still upserts (creates an smtp notifier) when the id is new.
+      if (existing && existing.type === 'smtp' && body.webhookUrl !== undefined) {
+        return reply.code(400).send({ error: 'webhookUrl not valid for an smtp notifier' });
+      }
+      if (existing && existing.type !== 'smtp' && body.secret !== undefined) {
+        return reply.code(400).send({ error: 'secret not valid for a webhook notifier' });
+      }
       const { secret, ...config } = body;
-      createNotifierConfigRepo(app.db, app.masterKey).put(id, {
+      repo.put(id, {
         ...config,
         ...(secret ? { user: secret.user, pass: secret.pass } : {}),
       });
@@ -136,7 +154,20 @@ export default function notifiersRoutes(
       const full = createNotifierConfigRepo(app.db, app.masterKey).get(id);
       if (!full) return reply.code(404).send({ error: 'notifier not found' });
       try {
-        await buildNotifier(full).send(TEST_PAYLOAD);
+        if (full.type === 'smtp') {
+          // For SMTP, verify the connection rather than delivering a real email.
+          await new SmtpNotifier({
+            host: full.host,
+            port: full.port,
+            secure: full.secure,
+            user: full.user,
+            pass: full.pass,
+            from: full.from,
+            to: full.to,
+          }).verify();
+        } else {
+          await buildNotifier(full).send(TEST_PAYLOAD);
+        }
         return { ok: true };
       } catch (err) {
         return reply

@@ -35,8 +35,9 @@ export interface NotifierResult {
 
 /**
  * A Notifier that fans out to several notifiers best-effort: one failing channel
- * does not abort the others, and the digest is considered delivered as long as
- * the fanout itself runs (individual failures are logged).
+ * does not abort the others. If EVERY channel fails, it throws so the caller
+ * (runScan) treats the digest as undelivered and does NOT mark the comments
+ * notified - otherwise they would be permanently lost.
  */
 export function buildCompositeNotifier(
   entries: { id: string; notifier: Notifier }[],
@@ -45,12 +46,20 @@ export function buildCompositeNotifier(
   return {
     id: 'composite',
     send: async (payload: NotificationPayload): Promise<void> => {
+      if (entries.length === 0) return;
+      let delivered = 0;
+      const failures: string[] = [];
       for (const { id, notifier } of entries) {
         try {
           await notifier.send(payload);
+          delivered++;
         } catch (err) {
+          failures.push(`${id}: ${err instanceof Error ? err.message : String(err)}`);
           logger.error({ err, notifier: id }, 'notifier failed');
         }
+      }
+      if (delivered === 0) {
+        throw new Error(`all notifiers failed: ${failures.join('; ')}`);
       }
     },
   };

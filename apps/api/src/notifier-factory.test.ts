@@ -58,4 +58,10 @@ describe('buildCompositeNotifier', () => {
     expect(send2).toHaveBeenCalled();
     expect(logger.error).toHaveBeenCalledTimes(1);
   });
+
+  it('throws when every notifier fails so the digest is not marked delivered', async () => {
+    const bad: Notifier = { id: 'b', send: vi.fn().mockRejectedValue(new Error('boom')) };
+    const composite = buildCompositeNotifier([{ id: 'b', notifier: bad }], { error: vi.fn() });
+    await expect(composite.send(payload)).rejects.toThrow(/all notifiers failed/);
+  });
 });
