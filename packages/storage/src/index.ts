@@ -9,5 +9,7 @@ export { createWatermarksRepo } from './watermarks-repo.js';
 export type { WatermarksRepo } from './watermarks-repo.js';
 export { ScheduleRepository } from './schedule-repo.js';
 export type { ScheduleRow, ScheduleInsert, SchedulePatch } from './schedule-repo.js';
+export { CommentReplyRepository } from './comment-reply-repo.js';
+export type { CommentReplyRow } from './comment-reply-repo.js';
 export { JiraSiteRepository, JiraProjectRepository } from './jira-repo.js';
 export type { JiraSiteRow, JiraSiteInsert, JiraSitePatch, JiraProjectRow } from './jira-repo.js';

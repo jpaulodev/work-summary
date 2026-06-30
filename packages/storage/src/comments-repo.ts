@@ -10,8 +10,8 @@ export function createCommentsRepo(db: SqliteDatabase): CommentsRepo {
   const hasStmt = db.prepare('SELECT 1 FROM notified_comments WHERE id = ?');
   const insertStmt = db.prepare(
     `INSERT OR REPLACE INTO notified_comments
-     (id, source, repo, container_type, container_number, comment_native_id, author_login, matched_rules, notified_at, issue_key)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     (id, source, repo, container_type, container_number, comment_native_id, author_login, matched_rules, notified_at, issue_key, comment_url)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   return {
     filterUnnotified(comments) {
@@ -33,6 +33,7 @@ export function createCommentsRepo(db: SqliteDatabase): CommentsRepo {
             JSON.stringify(c.matchedRules),
             notifiedAt,
             c.issueKey ?? null,
+            c.commentUrl,
           );
         }
       });

@@ -82,4 +82,28 @@ export class JiraClient {
   listFields(): Promise<{ id: string; name: string; custom: boolean }[]> {
     return this.req('/rest/api/3/field');
   }
+
+  async addComment(issueKey: string, adfBody: unknown): Promise<{ id: string; self: string }> {
+    const res = await fetch(
+      `${this.opts.baseUrl}/rest/api/3/issue/${encodeURIComponent(issueKey)}/comment`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: this.authHeader,
+          'content-type': 'application/json',
+          accept: 'application/json',
+        },
+        body: JSON.stringify({ body: adfBody }),
+      },
+    );
+    if (!res.ok) {
+      const err = new Error(`JIRA addComment ${issueKey} -> ${res.status}`) as Error & {
+        status: number;
+      };
+      err.status = res.status;
+      throw err;
+    }
+    const data = (await res.json()) as { id: string; self: string };
+    return { id: data.id, self: data.self };
+  }
 }

@@ -4,3 +4,7 @@ export { JiraClient } from './client.js';
 export type { JiraClientOptions, JiraIssue, JiraComment } from './client.js';
 export { JiraSource } from './jira-source.js';
 export type { JiraSourceDeps } from './jira-source.js';
+export { textToAdf } from './text-to-adf.js';
+export type { AdfDoc } from './text-to-adf.js';
+export { postJiraReply, JiraReplyScopeError } from './reply.js';
+export type { JiraReplyContext, JiraReplyResult } from './reply.js';

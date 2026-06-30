@@ -14,6 +14,7 @@ export interface CommentRow {
   note: string | null;
   snoozedUntil: string | null;
   issueKey: string | null;
+  replyCount: number;
 }
 
 export interface JiraSite {
