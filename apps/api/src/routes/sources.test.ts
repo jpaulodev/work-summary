@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { makeTestApp, authedCookie, TEST_KEY } from '../test-helpers.js';
 import { createOAuthConnectionService } from '@work-summary/config-db';
 import type { SqliteDatabase } from '@work-summary/storage';
@@ -10,6 +10,7 @@ beforeEach(async () => {
   ({ app, db } = await makeTestApp());
   cookie = await authedCookie(app);
 });
+afterEach(() => vi.unstubAllGlobals());
 
 const validRules = {
   authorOfPrUnanswered: true,
@@ -74,5 +75,44 @@ describe('sources routes', () => {
       payload: { rules: { authorOfPrUnanswered: 'yes' } },
     });
     expect(res.statusCode).toBe(400);
+  });
+
+  it('412 on repo discovery when GitHub is not connected', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/sources/github/repos',
+      headers: { cookie },
+    });
+    expect(res.statusCode).toBe(412);
+    expect(res.json<{ error: string }>().error).toBe('github-not-connected');
+  });
+
+  it('lists accessible repos from GitHub when connected', async () => {
+    createOAuthConnectionService(db, TEST_KEY).save(1, 'github', {
+      accessToken: 'gho_token',
+      accountLogin: 'octocat',
+    });
+    // Octokit calls GET /user/repos; one page, no Link header => no pagination.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify([
+            { full_name: 'octocat/hello-world', private: false },
+            { full_name: 'acme/secret-api', private: true },
+          ]),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      ),
+    );
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/sources/github/repos',
+      headers: { cookie },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ repos: Array<{ fullName: string }> }>().repos.map((r) => r.fullName)).toEqual(
+      ['octocat/hello-world', 'acme/secret-api'],
+    );
   });
 });

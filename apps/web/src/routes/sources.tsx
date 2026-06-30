@@ -1,8 +1,19 @@
-import { useEffect, useState } from 'react';
-import { Check, Github, Loader2, Plug, Save, Unplug, AlertTriangle } from 'lucide-react';
-import { useSources, useUpdateSources, useDisconnectOAuth } from '../lib/resources';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  Check,
+  Github,
+  Loader2,
+  Lock,
+  Plug,
+  RefreshCw,
+  Save,
+  Search,
+  Unplug,
+  AlertTriangle,
+} from 'lucide-react';
+import { useSources, useUpdateSources, useDisconnectOAuth, useGithubRepos } from '../lib/resources';
 import { Button } from '../components/ui/button';
-import { Label, Textarea } from '../components/ui/input';
+import { Label } from '../components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { JiraPanel } from '../components/jira-panel';
 import type { MatchRules } from '../lib/types';
@@ -58,7 +69,7 @@ export default function Sources(): JSX.Element {
   const update = useUpdateSources();
   const disconnect = useDisconnectOAuth();
   const oauthResult = useOAuthRedirectResult();
-  const [reposText, setReposText] = useState('');
+  const [selectedRepos, setSelectedRepos] = useState<string[]>([]);
   const [rules, setRules] = useState<MatchRules>(DEFAULT_RULES);
   const [excludeBots, setExcludeBots] = useState(true);
   const [saved, setSaved] = useState(false);
@@ -69,7 +80,7 @@ export default function Sources(): JSX.Element {
   useEffect(() => {
     const g = sources.data?.github;
     if (g) {
-      setReposText(g.repos.join('\n'));
+      setSelectedRepos(g.repos);
       if (g.rules) setRules(g.rules);
       if (g.filters) setExcludeBots(g.filters.excludeBots);
     }
@@ -77,14 +88,10 @@ export default function Sources(): JSX.Element {
 
   const onSave = (): void => {
     setSaved(false);
-    const repos = reposText
-      .split('\n')
-      .map((r) => r.trim())
-      .filter(Boolean);
     update.mutate(
       {
         enabled: true,
-        repos,
+        repos: selectedRepos,
         rules,
         filters: {
           excludeBots,
@@ -188,12 +195,11 @@ export default function Sources(): JSX.Element {
                 </a>
               )}
               <div>
-                <Label htmlFor="repos">Repositories (one per line)</Label>
-                <Textarea
-                  id="repos"
-                  placeholder={'org/repo-foo\norg/repo-bar'}
-                  value={reposText}
-                  onChange={(e) => setReposText(e.target.value)}
+                <Label>Repositories to scan</Label>
+                <RepoPicker
+                  connected={Boolean(connection)}
+                  selected={selectedRepos}
+                  onChange={setSelectedRepos}
                 />
               </div>
             </CardContent>
@@ -240,6 +246,106 @@ export default function Sources(): JSX.Element {
               </span>
             )}
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Searchable picker over the repos the connected GitHub account can access. */
+function RepoPicker({
+  connected,
+  selected,
+  onChange,
+}: {
+  connected: boolean;
+  selected: string[];
+  onChange: (next: string[]) => void;
+}): JSX.Element {
+  const repos = useGithubRepos(connected);
+  const [query, setQuery] = useState('');
+  const selectedSet = useMemo(() => new Set(selected), [selected]);
+
+  const toggle = (fullName: string): void =>
+    onChange(
+      selectedSet.has(fullName) ? selected.filter((r) => r !== fullName) : [...selected, fullName],
+    );
+
+  if (!connected) {
+    return (
+      <p className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+        Connect GitHub above to choose repositories.
+      </p>
+    );
+  }
+
+  const all = repos.data?.repos ?? [];
+  // Keep any selected repo that isn't in the fetched list (e.g. access changed)
+  // visible so it can still be unchecked.
+  const known = new Set(all.map((r) => r.fullName));
+  const extras = selected
+    .filter((r) => !known.has(r))
+    .map((fullName) => ({ fullName, private: false }));
+  const q = query.trim().toLowerCase();
+  const visible = [...extras, ...all].filter((r) => r.fullName.toLowerCase().includes(q));
+
+  return (
+    <div className="rounded-md border border-border">
+      <div className="flex items-center gap-2 border-b border-border p-2">
+        <Search className="ml-1 h-4 w-4 shrink-0 text-muted-foreground" />
+        <input
+          aria-label="Search repositories"
+          placeholder="Search your repositories…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          className="h-8 w-full bg-transparent text-sm focus-visible:outline-none"
+        />
+        <span className="shrink-0 px-1 text-xs text-muted-foreground">
+          {selected.length} selected
+        </span>
+        <Button
+          size="icon"
+          variant="ghost"
+          aria-label="Refresh repositories"
+          disabled={repos.isFetching}
+          onClick={() => void repos.refetch()}
+        >
+          <RefreshCw className={cn('h-4 w-4', repos.isFetching && 'animate-spin')} />
+        </Button>
+      </div>
+
+      {repos.isLoading ? (
+        <div className="py-10 text-center text-muted-foreground">
+          <Loader2 className="mx-auto h-5 w-5 animate-spin" />
+        </div>
+      ) : repos.isError ? (
+        <p className="p-4 text-sm text-danger">
+          Could not load your repositories. Try Refresh, or check the GitHub connection.
+        </p>
+      ) : visible.length === 0 ? (
+        <p className="p-4 text-sm text-muted-foreground">
+          {q ? 'No repositories match your search.' : 'No accessible repositories found.'}
+        </p>
+      ) : (
+        <div className="max-h-72 overflow-y-auto">
+          {visible.map((r) => {
+            const checked = selectedSet.has(r.fullName);
+            return (
+              <label
+                key={r.fullName}
+                className="flex cursor-pointer items-center gap-3 px-3 py-2 text-sm hover:bg-muted"
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => toggle(r.fullName)}
+                  className="h-4 w-4 accent-[hsl(var(--primary))]"
+                />
+                <span className="truncate">{r.fullName}</span>
+                {r.private && <Lock className="h-3 w-3 shrink-0 text-muted-foreground" />}
+              </label>
+            );
+          })}
         </div>
       )}
     </div>

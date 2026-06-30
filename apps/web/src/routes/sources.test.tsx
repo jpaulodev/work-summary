@@ -34,6 +34,58 @@ function renderPage() {
 
 afterEach(() => vi.unstubAllGlobals());
 
+describe('Sources screen — repo picker', () => {
+  function stubFetch(repos: Array<{ fullName: string; private: boolean }>) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string) => {
+        if (String(url).includes('/sources/github/repos'))
+          return Promise.resolve(new Response(JSON.stringify({ repos }), { status: 200 }));
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              github: github({
+                repos: [],
+                connection: { accountLogin: 'octocat', connectedAt: 'x' },
+              }),
+            }),
+            { status: 200 },
+          ),
+        );
+      }),
+    );
+  }
+
+  it('lists the accessible repositories and filters by search', async () => {
+    stubFetch([
+      { fullName: 'octocat/hello-world', private: false },
+      { fullName: 'acme/secret-api', private: true },
+    ]);
+    renderPage();
+    await waitFor(() => expect(screen.getByText('octocat/hello-world')).toBeInTheDocument());
+    expect(screen.getByText('acme/secret-api')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole('textbox', { name: /search repositories/i }), {
+      target: { value: 'secret' },
+    });
+    expect(screen.queryByText('octocat/hello-world')).not.toBeInTheDocument();
+    expect(screen.getByText('acme/secret-api')).toBeInTheDocument();
+  });
+
+  it('prompts to connect first when GitHub is not connected', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(new Response(JSON.stringify({ github: github() }), { status: 200 })),
+    );
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByText(/connect github above to choose repositories/i)).toBeInTheDocument(),
+    );
+  });
+});
+
 describe('Sources screen — GitHub OAuth', () => {
   it('shows a Connect GitHub link when not connected', async () => {
     vi.stubGlobal(
