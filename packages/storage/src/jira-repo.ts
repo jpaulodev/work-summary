@@ -3,9 +3,7 @@ import type { SqliteDatabase } from './db.js';
 export interface JiraSiteRow {
   id: string;
   baseUrl: string;
-  email: string;
-  encryptedToken: string;
-  tokenNonce: string;
+  cloudId: string | null;
   developerFieldId: string | null;
   enabled: boolean;
   createdAt: string;
@@ -16,9 +14,7 @@ export type JiraSiteInsert = Omit<JiraSiteRow, 'createdAt' | 'updatedAt'>;
 
 export interface JiraSitePatch {
   baseUrl?: string | undefined;
-  email?: string | undefined;
-  encryptedToken?: string | undefined;
-  tokenNonce?: string | undefined;
+  cloudId?: string | null | undefined;
   developerFieldId?: string | null | undefined;
   enabled?: boolean | undefined;
 }
@@ -26,14 +22,14 @@ export interface JiraSitePatch {
 interface RawSite {
   id: string;
   base_url: string;
-  email: string;
-  encrypted_token: string;
-  token_nonce: string;
+  cloud_id: string | null;
   developer_field_id: string | null;
   enabled: number;
   created_at: string;
   updated_at: string;
 }
+
+const SELECT_COLS = 'id, base_url, cloud_id, developer_field_id, enabled, created_at, updated_at';
 
 export class JiraSiteRepository {
   constructor(private readonly db: SqliteDatabase) {}
@@ -42,9 +38,7 @@ export class JiraSiteRepository {
     return {
       id: r.id,
       baseUrl: r.base_url,
-      email: r.email,
-      encryptedToken: r.encrypted_token,
-      tokenNonce: r.token_nonce,
+      cloudId: r.cloud_id,
       developerFieldId: r.developer_field_id,
       enabled: r.enabled === 1,
       createdAt: r.created_at,
@@ -53,36 +47,28 @@ export class JiraSiteRepository {
   }
 
   list(): JiraSiteRow[] {
-    return (this.db.prepare('SELECT * FROM jira_site ORDER BY base_url').all() as RawSite[]).map(
-      (r) => this.parse(r),
-    );
+    return (
+      this.db.prepare(`SELECT ${SELECT_COLS} FROM jira_site ORDER BY base_url`).all() as RawSite[]
+    ).map((r) => this.parse(r));
   }
 
   get(id: string): JiraSiteRow | null {
-    const r = this.db.prepare('SELECT * FROM jira_site WHERE id = ?').get(id) as
+    const r = this.db.prepare(`SELECT ${SELECT_COLS} FROM jira_site WHERE id = ?`).get(id) as
       RawSite | undefined;
     return r ? this.parse(r) : null;
   }
 
   insert(row: JiraSiteInsert): JiraSiteRow {
     const now = new Date().toISOString();
+    // The legacy email/encrypted_token/token_nonce columns are NOT NULL but
+    // unused under OAuth — write empty strings to satisfy the constraint.
     this.db
       .prepare(
         `INSERT INTO jira_site
-          (id, base_url, email, encrypted_token, token_nonce, developer_field_id, enabled, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          (id, base_url, cloud_id, email, encrypted_token, token_nonce, developer_field_id, enabled, created_at, updated_at)
+         VALUES (?, ?, ?, '', '', '', ?, ?, ?, ?)`,
       )
-      .run(
-        row.id,
-        row.baseUrl,
-        row.email,
-        row.encryptedToken,
-        row.tokenNonce,
-        row.developerFieldId,
-        row.enabled ? 1 : 0,
-        now,
-        now,
-      );
+      .run(row.id, row.baseUrl, row.cloudId, row.developerFieldId, row.enabled ? 1 : 0, now, now);
     return this.get(row.id) as JiraSiteRow;
   }
 
@@ -93,15 +79,12 @@ export class JiraSiteRepository {
     this.db
       .prepare(
         `UPDATE jira_site SET
-          base_url = ?, email = ?, encrypted_token = ?, token_nonce = ?,
-          developer_field_id = ?, enabled = ?, updated_at = ?
+          base_url = ?, cloud_id = ?, developer_field_id = ?, enabled = ?, updated_at = ?
          WHERE id = ?`,
       )
       .run(
         next.baseUrl,
-        next.email,
-        next.encryptedToken,
-        next.tokenNonce,
+        next.cloudId,
         next.developerFieldId,
         next.enabled ? 1 : 0,
         next.updatedAt,

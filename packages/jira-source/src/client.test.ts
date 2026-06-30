@@ -4,21 +4,18 @@ import { JiraClient } from './client.js';
 afterEach(() => vi.unstubAllGlobals());
 
 describe('JiraClient', () => {
-  it('sends Basic auth derived from email:token', async () => {
+  it('sends a Bearer token against the cloud-id base URL', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ accountId: 'u1', emailAddress: 'me@x.com' }), {
         status: 200,
       }),
     );
     vi.stubGlobal('fetch', fetchMock);
-    const client = new JiraClient({
-      baseUrl: 'https://acme.atlassian.net',
-      email: 'me@x.com',
-      token: 'tok',
-    });
+    const client = new JiraClient({ accessToken: 'tok', cloudId: 'cloud-1' });
     await client.myself();
-    const headers = (fetchMock.mock.calls[0]?.[1] as { headers: Record<string, string> }).headers;
-    expect(headers.authorization).toBe('Basic ' + Buffer.from('me@x.com:tok').toString('base64'));
+    const [url, init] = fetchMock.mock.calls[0] as [string, { headers: Record<string, string> }];
+    expect(url).toBe('https://api.atlassian.com/ex/jira/cloud-1/rest/api/3/myself');
+    expect(init.headers.authorization).toBe('Bearer tok');
   });
 
   it('retries once on 429 then succeeds', async () => {
@@ -33,9 +30,8 @@ describe('JiraClient', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
     const client = new JiraClient({
-      baseUrl: 'https://x.atlassian.net',
-      email: 'a',
-      token: 'b',
+      accessToken: 'tok',
+      cloudId: 'cloud-1',
       sleep: () => Promise.resolve(),
     });
     const r = await client.search('project = WS');
@@ -45,7 +41,7 @@ describe('JiraClient', () => {
 
   it('throws on non-ok responses', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 401 })));
-    const client = new JiraClient({ baseUrl: 'https://x.atlassian.net', email: 'a', token: 'b' });
+    const client = new JiraClient({ accessToken: 'tok', cloudId: 'cloud-1' });
     await expect(client.myself()).rejects.toThrow(/401/);
   });
 });

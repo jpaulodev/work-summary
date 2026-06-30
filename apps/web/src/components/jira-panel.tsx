@@ -1,57 +1,56 @@
 import { useState } from 'react';
-import { Loader2, Plus, Search, Trash2 } from 'lucide-react';
+import { Loader2, Plug, Search, Unplug } from 'lucide-react';
 import {
-  useJiraSites,
-  useCreateJiraSite,
-  useDeleteJiraSite,
+  useJiraSite,
+  useDisconnectJira,
   useJiraProjects,
   useDiscoverProjects,
   useSaveProjects,
 } from '../lib/jira';
 import { Button } from './ui/button';
-import { Input, Label } from './ui/input';
 import { Card } from './ui/card';
 import { Badge } from './ui/badge';
-import { Dialog } from './ui/dialog';
+import { cn } from '../lib/utils';
 import type { JiraDiscoveredProject, JiraSite } from '../lib/types';
 
 export function JiraPanel(): JSX.Element {
-  const sites = useJiraSites();
-  const [open, setOpen] = useState(false);
+  const status = useJiraSite();
 
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          Connect JIRA Cloud sites and choose projects to scan for pending comments.
-        </p>
-        <Button size="sm" onClick={() => setOpen(true)}>
-          <Plus className="h-4 w-4" /> Add JIRA site
-        </Button>
+  if (status.isLoading) {
+    return (
+      <div className="py-10 text-center text-muted-foreground">
+        <Loader2 className="mx-auto h-5 w-5 animate-spin" />
       </div>
+    );
+  }
 
-      {sites.isLoading ? (
-        <div className="py-10 text-center text-muted-foreground">
-          <Loader2 className="mx-auto h-5 w-5 animate-spin" />
-        </div>
-      ) : (sites.data?.length ?? 0) === 0 ? (
-        <p className="rounded-lg border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
-          No JIRA sites connected yet.
+  if (!status.data?.connected || !status.data.site) {
+    return (
+      <Card className="flex flex-col items-center gap-3 p-8 text-center">
+        <p className="text-sm text-muted-foreground">
+          Connect a JIRA Cloud site with OAuth to scan its projects for pending comments.
         </p>
-      ) : (
-        sites.data?.map((s) => <SiteCard key={s.id} site={s} />)
-      )}
+        <a
+          href="/api/oauth/jira/start"
+          className={cn(
+            'inline-flex h-10 items-center justify-center gap-2 rounded-md px-4 text-sm font-medium transition-all',
+            'bg-primary text-primary-foreground shadow-soft hover:brightness-110',
+          )}
+        >
+          <Plug className="h-4 w-4" /> Connect JIRA
+        </a>
+      </Card>
+    );
+  }
 
-      <AddSiteDialog open={open} onClose={() => setOpen(false)} />
-    </div>
-  );
+  return <SiteCard site={status.data.site} />;
 }
 
 function SiteCard({ site }: { site: JiraSite }): JSX.Element {
-  const projects = useJiraProjects(site.id);
-  const discover = useDiscoverProjects(site.id);
-  const save = useSaveProjects(site.id);
-  const remove = useDeleteJiraSite();
+  const projects = useJiraProjects(true);
+  const discover = useDiscoverProjects();
+  const save = useSaveProjects();
+  const disconnect = useDisconnectJira();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const host = (() => {
     try {
@@ -74,7 +73,7 @@ function SiteCard({ site }: { site: JiraSite }): JSX.Element {
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-sm font-semibold">{host}</p>
-          <p className="text-xs text-muted-foreground">{site.email}</p>
+          <p className="text-xs text-muted-foreground">Connected via OAuth</p>
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -91,12 +90,18 @@ function SiteCard({ site }: { site: JiraSite }): JSX.Element {
             Discover projects
           </Button>
           <Button
-            size="icon"
+            size="sm"
             variant="ghost"
-            aria-label="Delete site"
-            onClick={() => remove.mutate(site.id)}
+            aria-label="Disconnect JIRA"
+            disabled={disconnect.isPending}
+            onClick={() => disconnect.mutate()}
           >
-            <Trash2 className="h-4 w-4" />
+            {disconnect.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Unplug className="h-4 w-4" />
+            )}
+            Disconnect
           </Button>
         </div>
       </div>
@@ -121,10 +126,7 @@ function SiteCard({ site }: { site: JiraSite }): JSX.Element {
             save.mutate(
               discover.data
                 .filter((p) => selected.has(p.key))
-                .map((p) => ({
-                  projectKey: p.key,
-                  projectName: p.name,
-                })),
+                .map((p) => ({ projectKey: p.key, projectName: p.name })),
             )
           }
         />
@@ -167,73 +169,5 @@ function ProjectPicker({
         Save selection
       </Button>
     </div>
-  );
-}
-
-function AddSiteDialog({ open, onClose }: { open: boolean; onClose: () => void }): JSX.Element {
-  const create = useCreateJiraSite();
-  const [baseUrl, setBaseUrl] = useState('');
-  const [email, setEmail] = useState('');
-  const [token, setToken] = useState('');
-  const [error, setError] = useState<string | null>(null);
-
-  const submit = (): void => {
-    setError(null);
-    create.mutate(
-      { baseUrl, email, token },
-      {
-        onSuccess: () => {
-          setBaseUrl('');
-          setEmail('');
-          setToken('');
-          onClose();
-        },
-        onError: () => setError('Connection failed. Check the base URL, email, and API token.'),
-      },
-    );
-  };
-
-  return (
-    <Dialog
-      open={open}
-      onClose={onClose}
-      title="Add JIRA site"
-      description="We verify the API token against JIRA before saving."
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button onClick={submit} disabled={!baseUrl || !email || !token || create.isPending}>
-            {create.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-            Save
-          </Button>
-        </>
-      }
-    >
-      <div>
-        <Label htmlFor="jira-url">Base URL</Label>
-        <Input
-          id="jira-url"
-          placeholder="https://your-org.atlassian.net"
-          value={baseUrl}
-          onChange={(e) => setBaseUrl(e.target.value)}
-        />
-      </div>
-      <div>
-        <Label htmlFor="jira-email">Email</Label>
-        <Input id="jira-email" value={email} onChange={(e) => setEmail(e.target.value)} />
-      </div>
-      <div>
-        <Label htmlFor="jira-token">API token</Label>
-        <Input
-          id="jira-token"
-          type="password"
-          value={token}
-          onChange={(e) => setToken(e.target.value)}
-        />
-      </div>
-      {error && <p className="text-sm text-danger">{error}</p>}
-    </Dialog>
   );
 }

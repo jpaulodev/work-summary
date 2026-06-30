@@ -6,7 +6,7 @@ describe('runMigrations', () => {
   it('applies 0001 on a fresh in-memory DB', () => {
     const db = openDatabase(':memory:');
     const result = runMigrations(db);
-    expect(result.applied).toEqual([1, 2, 3, 4, 6, 7]);
+    expect(result.applied).toEqual([1, 2, 3, 4, 6, 7, 8]);
     const tables = db
       .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
       .all() as { name: string }[];
@@ -28,6 +28,6 @@ describe('runMigrations', () => {
     const db = openDatabase(':memory:');
     runMigrations(db);
     const rows = db.prepare('SELECT version FROM schema_version').all() as { version: number }[];
-    expect(rows.map((r) => r.version)).toEqual([1, 2, 3, 4, 6, 7]);
+    expect(rows.map((r) => r.version)).toEqual([1, 2, 3, 4, 6, 7, 8]);
   });
 });

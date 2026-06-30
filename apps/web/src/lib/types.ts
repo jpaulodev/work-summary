@@ -20,10 +20,13 @@ export interface CommentRow {
 export interface JiraSite {
   id: string;
   baseUrl: string;
-  email: string;
   developerFieldId: string | null;
   enabled: boolean;
-  hasToken: boolean;
+}
+
+export interface JiraSiteStatus {
+  connected: boolean;
+  site?: JiraSite;
 }
 
 export interface JiraProject {

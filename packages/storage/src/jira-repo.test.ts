@@ -15,9 +15,7 @@ describe('JiraSiteRepository', () => {
     repo.insert({
       id: 's1',
       baseUrl: 'https://acme.atlassian.net',
-      email: 'me@x.com',
-      encryptedToken: 'enc',
-      tokenNonce: 'nonce',
+      cloudId: 'cloud-1',
       developerFieldId: null,
       enabled: true,
     });
@@ -31,9 +29,7 @@ describe('JiraSiteRepository', () => {
     repo.insert({
       id: 's1',
       baseUrl: 'https://a.net',
-      email: 'a@b',
-      encryptedToken: 'e',
-      tokenNonce: 'n',
+      cloudId: 'cloud-1',
       developerFieldId: null,
       enabled: true,
     });
@@ -50,9 +46,7 @@ describe('JiraProjectRepository', () => {
     new JiraSiteRepository(db).insert({
       id: 'site1',
       baseUrl: 'https://a.net',
-      email: 'a@b',
-      encryptedToken: 'e',
-      tokenNonce: 'n',
+      cloudId: 'cloud-1',
       developerFieldId: null,
       enabled: true,
     });

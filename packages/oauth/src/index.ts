@@ -1,4 +1,5 @@
 import { githubProvider } from './github.js';
+import { jiraProvider } from './jira.js';
 import {
   OAuthError,
   type AuthorizeParams,
@@ -24,8 +25,8 @@ export {
 
 const PROVIDERS: Record<OAuthProvider, Provider> = {
   github: githubProvider,
-  // jira added in Phase 7b
-} as Record<OAuthProvider, Provider>;
+  jira: jiraProvider,
+};
 
 function resolve(provider: OAuthProvider): Provider {
   const p = PROVIDERS[provider];

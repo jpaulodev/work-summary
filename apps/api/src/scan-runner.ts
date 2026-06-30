@@ -2,12 +2,12 @@ import type { FastifyInstance } from 'fastify';
 import { runScan, type Config } from '@work-summary/cli';
 import { createOctokit, GithubSource, type Source } from '@work-summary/github-source';
 import { JiraSource } from '@work-summary/jira-source';
-import { decryptSecret } from '@work-summary/auth';
 import {
   createSourceConfigRepo,
   createNotifierConfigRepo,
   createOAuthConnectionService,
 } from '@work-summary/config-db';
+import { getValidJiraAccess, type JiraAccess } from './jira-access.js';
 import {
   createCommentsRepo,
   createRunsRepo,
@@ -26,6 +26,7 @@ import { buildNotifier, buildCompositeNotifier } from './notifier-factory.js';
 function buildCompositeSource(
   app: FastifyInstance,
   githubSource: GithubSource | null,
+  jiraAccess: JiraAccess | null,
   since: Date,
   lookbackDays: number,
 ): Source {
@@ -37,14 +38,15 @@ function buildCompositeSource(
     fetchPendingComments: async (opts): Promise<PendingComment[]> => {
       // GitHub is skipped entirely when no OAuth connection exists.
       const github = githubSource ? await githubSource.fetchPendingComments(opts) : [];
-      if (sites.length === 0) return github;
+      if (!jiraAccess || sites.length === 0) return github;
       // JIRA is best-effort: a failing site/token must not discard the GitHub
       // results already fetched or fail the whole scan run.
       try {
         const jira = new JiraSource({
           sites,
           projects: sites.flatMap((s) => projectRepo.listBySite(s.id)),
-          decryptToken: (enc, nonce) => decryptSecret(enc, nonce, app.masterKey),
+          accessToken: jiraAccess.accessToken,
+          cloudId: jiraAccess.cloudId,
           since,
           lookbackDays,
           logger: { error: (msg, err) => process.stderr.write(`${msg}: ${String(err)}\n`) },
@@ -86,9 +88,9 @@ export async function triggerScan(
       userId,
       'github',
     );
-    const sites = new JiraSiteRepository(app.db).list();
-    if (!ghTokens && sites.length === 0) {
-      throw new Error('no source connected: connect GitHub or add a JIRA site');
+    const jiraAccess = await getValidJiraAccess(app, userId);
+    if (!ghTokens && !jiraAccess) {
+      throw new Error('no source connected: connect GitHub or JIRA');
     }
 
     // Build a notifier per enabled config (smtp/slack/teams) and fan out to all.
@@ -157,7 +159,13 @@ export async function triggerScan(
         commentsRepo: createCommentsRepo(app.db),
         runsRepo: createRunsRepo(app.db, () => new Date()),
         watermarksRepo: createWatermarksRepo(app.db),
-        source: buildCompositeSource(app, githubSource, since, config.scan.lookbackDays),
+        source: buildCompositeSource(
+          app,
+          githubSource,
+          jiraAccess,
+          since,
+          config.scan.lookbackDays,
+        ),
         notifier: composite,
         logger,
       },

@@ -30,11 +30,7 @@ describe('postJiraReply', () => {
       }),
     );
     vi.stubGlobal('fetch', fetchMock);
-    const client = new JiraClient({
-      baseUrl: 'https://x.atlassian.net',
-      email: 'me@x',
-      token: 'tok',
-    });
+    const client = new JiraClient({ accessToken: 'tok', cloudId: 'cloud-1' });
     const r = await postJiraReply({ client, issueKey: 'WS-1', body: 'noted' });
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/rest/api/3/issue/WS-1/comment');
     const reqBody = JSON.parse((fetchMock.mock.calls[0]?.[1] as { body: string }).body) as {
@@ -47,7 +43,7 @@ describe('postJiraReply', () => {
 
   it('maps 401 to token-write-scope', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 401 })));
-    const client = new JiraClient({ baseUrl: 'https://x', email: 'a', token: 'b' });
+    const client = new JiraClient({ accessToken: 'b', cloudId: 'cloud-1' });
     await expect(postJiraReply({ client, issueKey: 'WS-1', body: 'x' })).rejects.toMatchObject({
       code: 'token-write-scope',
     });

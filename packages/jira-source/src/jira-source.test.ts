@@ -7,15 +7,15 @@ afterEach(() => vi.unstubAllGlobals());
 const site: JiraSiteRow = {
   id: 's',
   baseUrl: 'https://x.atlassian.net',
-  email: 'me@x',
-  encryptedToken: 'enc',
-  tokenNonce: 'nonce',
+  cloudId: 'cloud-1',
   developerFieldId: null,
   enabled: true,
   createdAt: '',
   updatedAt: '',
 };
 const project: JiraProjectRow = { id: 1, siteId: 's', projectKey: 'WS', projectName: 'Work' };
+
+const baseDeps = { accessToken: 'tok', cloudId: 'cloud-1', sleep: () => Promise.resolve() };
 
 describe('JiraSource', () => {
   it('filters out comments authored by the current user and normalizes the rest', async () => {
@@ -77,9 +77,8 @@ describe('JiraSource', () => {
     const source = new JiraSource({
       sites: [site],
       projects: [project],
-      decryptToken: () => 'tok',
+      ...baseDeps,
       since: new Date(Date.now() - 7 * 86400000),
-      sleep: () => Promise.resolve(),
     });
     const out = await source.fetchPendingComments();
     expect(out).toHaveLength(1);
@@ -91,19 +90,20 @@ describe('JiraSource', () => {
     expect(out[0]?.commentUrl).toContain('focusedCommentId=c2');
   });
 
-  it('isolates a failing site and still returns other sites results', async () => {
-    const goodSite = { ...site, id: 'good', baseUrl: 'https://good.atlassian.net' };
-    const badSite = { ...site, id: 'bad', baseUrl: 'https://bad.atlassian.net' };
+  it('isolates a failing site iteration and still returns other results', async () => {
+    const good = { ...site, id: 'good' };
+    const bad = { ...site, id: 'bad' };
     const now = new Date().toISOString();
     vi.stubGlobal(
       'fetch',
       vi.fn().mockImplementation((url: string) => {
-        if (url.startsWith('https://bad.'))
-          return Promise.resolve(new Response('', { status: 500 }));
         if (url.endsWith('/myself'))
           return Promise.resolve(
             new Response(JSON.stringify({ accountId: 'me' }), { status: 200 }),
           );
+        // Project "BAD" search blows up; "WS" succeeds.
+        if (url.includes('/search') && decodeURIComponent(url).includes('BAD'))
+          return Promise.resolve(new Response('', { status: 500 }));
         if (url.includes('/search'))
           return Promise.resolve(
             new Response(
@@ -138,14 +138,13 @@ describe('JiraSource', () => {
       }),
     );
     const source = new JiraSource({
-      sites: [badSite, goodSite],
+      sites: [bad, good],
       projects: [
-        { id: 1, siteId: 'bad', projectKey: 'WS', projectName: 'W' },
+        { id: 1, siteId: 'bad', projectKey: 'BAD', projectName: 'B' },
         { id: 2, siteId: 'good', projectKey: 'WS', projectName: 'W' },
       ],
-      decryptToken: () => 'tok',
+      ...baseDeps,
       since: new Date(0),
-      sleep: () => Promise.resolve(),
       logger: { error: () => undefined },
     });
     const out = await source.fetchPendingComments();
@@ -162,13 +161,11 @@ describe('JiraSource', () => {
       projects: [
         { id: 1, siteId: 's', projectKey: 'X" OR project IS NOT EMPTY', projectName: 'evil' },
       ],
-      decryptToken: () => 'tok',
+      ...baseDeps,
       since: new Date(0),
-      sleep: () => Promise.resolve(),
     });
     const out = await source.fetchPendingComments();
     expect(out).toEqual([]);
-    // only /myself was called; no /search with the injected JQL
     expect(fetchMock.mock.calls.every((c) => !String(c[0]).includes('/search'))).toBe(true);
   });
 
@@ -178,9 +175,8 @@ describe('JiraSource', () => {
     const source = new JiraSource({
       sites: [{ ...site, enabled: false }],
       projects: [project],
-      decryptToken: () => 'tok',
+      ...baseDeps,
       since: new Date(0),
-      sleep: () => Promise.resolve(),
     });
     expect(await source.fetchPendingComments()).toEqual([]);
     expect(fetchMock).not.toHaveBeenCalled();

@@ -1,46 +1,53 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './api';
-import type { JiraDiscoveredProject, JiraProject, JiraSite } from './types';
+import type { JiraDiscoveredProject, JiraProject, JiraSiteStatus } from './types';
 
-export function useJiraSites() {
-  return useQuery({ queryKey: ['jira-sites'], queryFn: () => api.get<JiraSite[]>('/jira/sites') });
-}
-
-export function useCreateJiraSite() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (input: { baseUrl: string; email: string; token: string }) =>
-      api.post<JiraSite>('/jira/sites', input),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['jira-sites'] }),
-  });
-}
-
-export function useDeleteJiraSite() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) => api.del<void>(`/jira/sites/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['jira-sites'] }),
-  });
-}
-
-export function useJiraProjects(siteId: string) {
+export function useJiraSite() {
   return useQuery({
-    queryKey: ['jira-projects', siteId],
-    queryFn: () => api.get<JiraProject[]>(`/jira/sites/${siteId}/projects`),
+    queryKey: ['jira-site'],
+    queryFn: () => api.get<JiraSiteStatus>('/jira/site'),
   });
 }
 
-export function useDiscoverProjects(siteId: string) {
+export function useUpdateJiraSite() {
+  const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => api.get<JiraDiscoveredProject[]>(`/jira/sites/${siteId}/projects/discover`),
+    mutationFn: (input: { developerFieldId?: string | null; enabled?: boolean }) =>
+      api.put<unknown>('/jira/site', input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['jira-site'] }),
   });
 }
 
-export function useSaveProjects(siteId: string) {
+export function useDisconnectJira() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.del<void>('/jira/site'),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['jira-site'] });
+      void qc.invalidateQueries({ queryKey: ['jira-projects'] });
+    },
+  });
+}
+
+export function useJiraProjects(connected: boolean) {
+  return useQuery({
+    queryKey: ['jira-projects'],
+    queryFn: () => api.get<JiraProject[]>('/jira/site/projects'),
+    enabled: connected,
+  });
+}
+
+export function useDiscoverProjects() {
+  return useMutation({
+    mutationFn: () => api.get<JiraDiscoveredProject[]>('/jira/site/projects/discover'),
+  });
+}
+
+export function useSaveProjects() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (projects: { projectKey: string; projectName: string }[]) =>
-      api.put<JiraProject[]>(`/jira/sites/${siteId}/projects`, { projects }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['jira-projects', siteId] }),
+      api.put<JiraProject[]>('/jira/site/projects', { projects }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['jira-projects'] }),
   });
 }
