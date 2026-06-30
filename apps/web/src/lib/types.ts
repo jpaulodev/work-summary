@@ -69,3 +69,17 @@ export interface ScanStatus {
   running: boolean;
   runId?: number;
 }
+
+export interface Schedule {
+  id: string;
+  name: string;
+  enabled: boolean;
+  cronExpression: string;
+  timezone: string;
+  reposFilter: string[] | null;
+  createdAt: string;
+  updatedAt: string;
+  lastRunAt: string | null;
+  lastRunId: number | null;
+  nextRunAt: string | null;
+}

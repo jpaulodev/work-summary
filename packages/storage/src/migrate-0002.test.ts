@@ -5,7 +5,7 @@ describe('migration 0002', () => {
   it('applies both 0001 and 0002 to a fresh DB', () => {
     const db = openDatabase(':memory:');
     const r = runMigrations(db);
-    expect(r.applied).toEqual([1, 2]);
+    expect(r.applied).toEqual([1, 2, 3]);
     const tables = (
       db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]
     ).map((t) => t.name);

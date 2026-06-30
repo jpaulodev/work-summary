@@ -1,5 +1,14 @@
 import { NavLink, Navigate, Outlet } from 'react-router-dom';
-import { Bell, Github, Inbox, LayoutGrid, ListChecks, LogOut, Settings } from 'lucide-react';
+import {
+  Bell,
+  CalendarClock,
+  Github,
+  Inbox,
+  LayoutGrid,
+  ListChecks,
+  LogOut,
+  Settings,
+} from 'lucide-react';
 import { useMe, useLogout } from '../lib/auth';
 import { Button } from '../components/ui/button';
 import { cn } from '../lib/utils';
@@ -9,6 +18,7 @@ const NAV = [
   { to: '/sources', label: 'Sources', icon: Github, end: false },
   { to: '/notifications', label: 'Notifications', icon: Bell, end: false },
   { to: '/runs', label: 'Runs', icon: ListChecks, end: false },
+  { to: '/schedules', label: 'Schedules', icon: CalendarClock, end: false },
   { to: '/settings', label: 'Settings', icon: Settings, end: false },
 ];
 

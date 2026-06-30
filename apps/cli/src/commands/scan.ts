@@ -34,13 +34,15 @@ export interface RunScanArgs {
   deps: ScanDeps;
   dryRun: boolean;
   now: () => Date;
+  /** Recorded on the runs row (e.g. 'manual', 'cron', 'schedule:<id>'). */
+  triggeredBy?: string;
 }
 
 export async function runScan(
   args: RunScanArgs,
 ): Promise<{ exitCode: number; newComments: number; runId: number }> {
   const { config, deps, dryRun, now } = args;
-  const runId = deps.runsRepo.startRun();
+  const runId = deps.runsRepo.startRun(args.triggeredBy ?? 'manual');
   const log = deps.logger.child({ runId });
 
   const lookbackMs = config.scan.lookbackDays * 24 * 60 * 60 * 1000;
