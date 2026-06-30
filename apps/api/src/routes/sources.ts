@@ -25,9 +25,10 @@ export default function sourcesRoutes(
 ): void {
   app.get(
     '/sources',
-    authed(() => {
-      const g = createSourceConfigRepo(app.db).getGithub();
-      const conn = createOAuthConnectionService(app.db, app.masterKey).getView(1, 'github');
+    authed((req) => {
+      const userId = req.userId as number;
+      const g = createSourceConfigRepo(app.db, userId).getGithub();
+      const conn = createOAuthConnectionService(app.db, app.masterKey).getView(userId, 'github');
       return {
         github: {
           enabled: g?.enabled ?? true,
@@ -46,7 +47,7 @@ export default function sourcesRoutes(
     '/sources/github',
     authed((req) => {
       const body = PutSchema.parse(req.body);
-      createSourceConfigRepo(app.db).putGithub(body);
+      createSourceConfigRepo(app.db, req.userId as number).putGithub(body);
       return { ok: true };
     }),
   );

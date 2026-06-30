@@ -18,11 +18,11 @@ const fullRules = {
 
 describe('sourceConfigRepo', () => {
   it('returns null when no config', () => {
-    expect(createSourceConfigRepo(db).getGithub()).toBeNull();
+    expect(createSourceConfigRepo(db, 1).getGithub()).toBeNull();
   });
 
   it('round-trips github config (no token — token lives in oauth_connection)', () => {
-    const repo = createSourceConfigRepo(db);
+    const repo = createSourceConfigRepo(db, 1);
     repo.putGithub({
       enabled: true,
       repos: ['org/a'],
@@ -36,7 +36,7 @@ describe('sourceConfigRepo', () => {
   });
 
   it('merges repos on a subsequent put without losing rules/filters', () => {
-    const repo = createSourceConfigRepo(db);
+    const repo = createSourceConfigRepo(db, 1);
     repo.putGithub({
       enabled: true,
       repos: ['org/a'],
@@ -50,7 +50,7 @@ describe('sourceConfigRepo', () => {
   });
 
   it('stores no token columns for github', () => {
-    const repo = createSourceConfigRepo(db);
+    const repo = createSourceConfigRepo(db, 1);
     repo.putGithub({
       repos: ['org/a'],
       rules: fullRules,

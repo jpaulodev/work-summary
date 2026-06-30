@@ -1,9 +1,31 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { randomBytes } from 'node:crypto';
-import { verifyPassword, signSessionId } from '@work-summary/auth';
+import { verifyPassword, hashPassword, signSessionId } from '@work-summary/auth';
+import { findUsableInvite } from './invites.js';
 
 const LoginSchema = z.object({ username: z.string(), password: z.string() });
+const RegisterSchema = z.object({
+  token: z.string().min(1),
+  username: z.string().min(1).max(64),
+  password: z.string().min(8),
+});
+
+/** Open a session for a user and set the signed session cookie. */
+function startSession(app: FastifyInstance, reply: FastifyReply, userId: number): void {
+  const sid = randomBytes(32).toString('hex');
+  const expires = new Date(app.now().getTime() + 14 * 24 * 60 * 60 * 1000);
+  app.db
+    .prepare('INSERT INTO app_session (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)')
+    .run(sid, userId, app.now().toISOString(), expires.toISOString());
+  void reply.setCookie('ws_session', signSessionId(sid, app.sessionSecret), {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    expires,
+    path: '/',
+  });
+}
 
 // A fixed argon2id hash verified on the unknown-username path so login takes the
 // same time whether or not the username exists (mitigates user enumeration).
@@ -22,19 +44,41 @@ export default function authRoutes(app: FastifyInstance, _opts: unknown, done: (
     }
     if (!(await verifyPassword(body.password, row.password_hash)))
       return reply.code(401).send({ error: 'invalid' });
-    const sid = randomBytes(32).toString('hex');
-    const expires = new Date(app.now().getTime() + 14 * 24 * 60 * 60 * 1000);
-    app.db
-      .prepare('INSERT INTO app_session (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)')
-      .run(sid, row.id, app.now().toISOString(), expires.toISOString());
-    void reply.setCookie('ws_session', signSessionId(sid, app.sessionSecret), {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      expires,
-      path: '/',
-    });
+    startSession(app, reply, row.id);
     return reply.send({ ok: true });
+  });
+
+  app.post('/register', async (req, reply) => {
+    const body = RegisterSchema.parse(req.body);
+    const invite = findUsableInvite(app, body.token);
+    if ('error' in invite) return reply.code(400).send({ error: invite.error });
+    const taken = app.db.prepare('SELECT 1 FROM app_user WHERE username = ?').get(body.username);
+    if (taken) return reply.code(409).send({ error: 'username-taken' });
+    // Hash outside the transaction (argon2 is async); the transaction below
+    // atomically consumes the invite and creates the user so a token cannot be
+    // redeemed twice under concurrency.
+    const hash = await hashPassword(body.password);
+    const now = app.now().toISOString();
+    const claim = app.db.transaction((): number | null => {
+      const consumed = app.db
+        .prepare(
+          'UPDATE invite SET consumed_by = -1, consumed_at = ? WHERE id = ? AND consumed_by IS NULL',
+        )
+        .run(now, invite.id);
+      if (consumed.changes === 0) return null; // lost the race
+      const info = app.db
+        .prepare(
+          'INSERT INTO app_user (username, password_hash, role, email, created_at) VALUES (?, ?, ?, ?, ?)',
+        )
+        .run(body.username, hash, invite.role, invite.email, now);
+      const userId = Number(info.lastInsertRowid);
+      app.db.prepare('UPDATE invite SET consumed_by = ? WHERE id = ?').run(userId, invite.id);
+      return userId;
+    });
+    const userId = claim();
+    if (userId === null) return reply.code(400).send({ error: 'invalid-invite' });
+    startSession(app, reply, userId);
+    return reply.code(201).send({ ok: true });
   });
 
   app.post('/logout', (req, reply) => {
@@ -49,9 +93,10 @@ export default function authRoutes(app: FastifyInstance, _opts: unknown, done: (
 
   app.get('/me', (req, reply) => {
     if (!req.userId) return reply.code(401).send({ error: 'unauthenticated' });
-    const row = app.db.prepare('SELECT username FROM app_user WHERE id = ?').get(req.userId) as
-      { username: string } | undefined;
-    return reply.send({ username: row?.username });
+    const row = app.db
+      .prepare('SELECT username, role FROM app_user WHERE id = ?')
+      .get(req.userId) as { username: string; role: string } | undefined;
+    return reply.send({ username: row?.username, role: row?.role });
   });
   done();
 }

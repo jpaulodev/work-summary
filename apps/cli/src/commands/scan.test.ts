@@ -70,9 +70,9 @@ function makeDeps(
   runMigrations(db);
   return {
     db,
-    commentsRepo: createCommentsRepo(db),
-    runsRepo: createRunsRepo(db, () => new Date('2026-06-01T00:00:00Z')),
-    watermarksRepo: createWatermarksRepo(db),
+    commentsRepo: createCommentsRepo(db, 1),
+    runsRepo: createRunsRepo(db, 1, () => new Date('2026-06-01T00:00:00Z')),
+    watermarksRepo: createWatermarksRepo(db, 1),
     source: { id: 'github' as const, fetchPendingComments: () => Promise.resolve(comments) },
     notifier: { id: 'smtp', send: (p: { comments: PendingComment[] }) => sendImpl(p.comments) },
     logger: pino({ level: 'silent' }),

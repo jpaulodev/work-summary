@@ -29,13 +29,14 @@ export default function repliesRoutes(
   app.post(
     '/comments/:id/reply',
     authed(async (req, reply) => {
+      const userId = req.userId as number;
       const { id } = z.object({ id: z.string() }).parse(req.params);
       const { body } = BodySchema.parse(req.body);
       const comment = app.db
         .prepare(
-          'SELECT id, source, repo, issue_key, comment_url FROM notified_comments WHERE id = ?',
+          'SELECT id, source, repo, issue_key, comment_url FROM notified_comments WHERE id = ? AND user_id = ?',
         )
-        .get(id) as CommentRow | undefined;
+        .get(id, userId) as CommentRow | undefined;
       if (!comment) return reply.code(404).send({ error: 'not found' });
 
       let result: { id: string | number; url: string };
@@ -48,7 +49,10 @@ export default function repliesRoutes(
                 'This comment was collected before reply support was added; re-scan to enable replying.',
             });
           }
-          const tokens = createOAuthConnectionService(app.db, app.masterKey).getTokens(1, 'github');
+          const tokens = createOAuthConnectionService(app.db, app.masterKey).getTokens(
+            userId,
+            'github',
+          );
           if (!tokens) {
             return reply
               .code(412)
@@ -66,7 +70,7 @@ export default function repliesRoutes(
               .code(412)
               .send({ error: 'no-issue-key', message: 'Missing JIRA issue key.' });
           }
-          const jiraAccess = await getValidJiraAccess(app, 1);
+          const jiraAccess = await getValidJiraAccess(app, userId);
           if (!jiraAccess) {
             return reply.code(412).send({ error: 'no-source', message: 'JIRA is not connected.' });
           }
@@ -91,7 +95,7 @@ export default function repliesRoutes(
           .send({ error: 'upstream', message: err instanceof Error ? err.message : String(err) });
       }
 
-      const row = new CommentReplyRepository(app.db).insert({
+      const row = new CommentReplyRepository(app.db, userId).insert({
         commentId: id,
         body,
         sentAt: app.now().toISOString(),
@@ -101,11 +105,11 @@ export default function repliesRoutes(
       });
       app.db
         .prepare(
-          `INSERT INTO comment_status (comment_id, status, snoozed_until, note, updated_at)
-           VALUES (?, 'addressed', NULL, NULL, ?)
-           ON CONFLICT(comment_id) DO UPDATE SET status='addressed', updated_at=excluded.updated_at`,
+          `INSERT INTO comment_status (user_id, comment_id, status, snoozed_until, note, updated_at)
+           VALUES (?, ?, 'addressed', NULL, NULL, ?)
+           ON CONFLICT(user_id, comment_id) DO UPDATE SET status='addressed', updated_at=excluded.updated_at`,
         )
-        .run(id, app.now().toISOString());
+        .run(userId, id, app.now().toISOString());
       return { reply: row, status: 'addressed' };
     }),
   );
@@ -114,7 +118,7 @@ export default function repliesRoutes(
     '/comments/:id/replies',
     authed((req) => {
       const { id } = z.object({ id: z.string() }).parse(req.params);
-      return new CommentReplyRepository(app.db).listByComment(id);
+      return new CommentReplyRepository(app.db, req.userId as number).listByComment(id);
     }),
   );
   done();

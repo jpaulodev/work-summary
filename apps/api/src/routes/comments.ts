@@ -26,8 +26,9 @@ export default function commentsRoutes(
     '/comments',
     authed((req) => {
       const q = QuerySchema.parse(req.query);
-      const wheres: string[] = [];
-      const params: unknown[] = [];
+      const userId = req.userId as number;
+      const wheres: string[] = ['nc.user_id = ?'];
+      const params: unknown[] = [userId];
       if (q.repo) {
         wheres.push('nc.repo = ?');
         params.push(q.repo);
@@ -60,8 +61,9 @@ export default function commentsRoutes(
         nc.author_login AS author, nc.matched_rules AS matchedRules, nc.notified_at AS notifiedAt,
         nc.issue_key AS issueKey,
         COALESCE(cs.status,'pending') AS status, cs.note, cs.snoozed_until AS snoozedUntil,
-        (SELECT COUNT(*) FROM comment_reply cr WHERE cr.comment_id = nc.id) AS replyCount
-      FROM notified_comments nc LEFT JOIN comment_status cs ON cs.comment_id = nc.id
+        (SELECT COUNT(*) FROM comment_reply cr WHERE cr.comment_id = nc.id AND cr.user_id = nc.user_id) AS replyCount
+      FROM notified_comments nc
+        LEFT JOIN comment_status cs ON cs.comment_id = nc.id AND cs.user_id = nc.user_id
       ${wheres.length ? 'WHERE ' + wheres.join(' AND ') : ''}
       ORDER BY nc.notified_at DESC, nc.id DESC LIMIT ?`;
       params.push(q.limit + 1);
@@ -84,11 +86,12 @@ export default function commentsRoutes(
       const body = StatusSchema.parse(req.body);
       app.db
         .prepare(
-          `INSERT INTO comment_status (comment_id, status, snoozed_until, note, updated_at)
-           VALUES (?, ?, ?, ?, ?) ON CONFLICT(comment_id) DO UPDATE SET status=excluded.status,
+          `INSERT INTO comment_status (user_id, comment_id, status, snoozed_until, note, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(user_id, comment_id) DO UPDATE SET status=excluded.status,
              snoozed_until=excluded.snoozed_until, note=excluded.note, updated_at=excluded.updated_at`,
         )
         .run(
+          req.userId,
           id,
           body.status,
           body.snoozedUntil ?? null,

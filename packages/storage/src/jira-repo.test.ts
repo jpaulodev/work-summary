@@ -11,7 +11,7 @@ beforeEach(() => {
 
 describe('JiraSiteRepository', () => {
   it('inserts, lists and gets a site', () => {
-    const repo = new JiraSiteRepository(db);
+    const repo = new JiraSiteRepository(db, 1);
     repo.insert({
       id: 's1',
       baseUrl: 'https://acme.atlassian.net',
@@ -25,7 +25,7 @@ describe('JiraSiteRepository', () => {
   });
 
   it('updates and deletes', () => {
-    const repo = new JiraSiteRepository(db);
+    const repo = new JiraSiteRepository(db, 1);
     repo.insert({
       id: 's1',
       baseUrl: 'https://a.net',
@@ -43,7 +43,7 @@ describe('JiraSiteRepository', () => {
 
 describe('JiraProjectRepository', () => {
   beforeEach(() => {
-    new JiraSiteRepository(db).insert({
+    new JiraSiteRepository(db, 1).insert({
       id: 'site1',
       baseUrl: 'https://a.net',
       cloudId: 'cloud-1',
@@ -53,7 +53,7 @@ describe('JiraProjectRepository', () => {
   });
 
   it('replaceForSite is transactional and replaces prior set', () => {
-    const repo = new JiraProjectRepository(db);
+    const repo = new JiraProjectRepository(db, 1);
     repo.replaceForSite('site1', [{ projectKey: 'WS', projectName: 'Work Summary' }]);
     repo.replaceForSite('site1', [
       { projectKey: 'WS', projectName: 'Work Summary' },
@@ -68,9 +68,33 @@ describe('JiraProjectRepository', () => {
   });
 
   it('cascades delete when the site is removed', () => {
-    const projectRepo = new JiraProjectRepository(db);
+    const projectRepo = new JiraProjectRepository(db, 1);
     projectRepo.replaceForSite('site1', [{ projectKey: 'WS', projectName: 'Work' }]);
-    new JiraSiteRepository(db).delete('site1');
+    new JiraSiteRepository(db, 1).delete('site1');
     expect(projectRepo.listBySite('site1')).toHaveLength(0);
+  });
+
+  it('isolates projects per user even when two users share a cloud id', () => {
+    // user 1's site 'site1' already exists (beforeEach). Add user 2's site with
+    // the SAME id (the Atlassian cloud id, shared across an org).
+    new JiraSiteRepository(db, 2).insert({
+      id: 'site1',
+      baseUrl: 'https://a.net',
+      cloudId: 'cloud-1',
+      developerFieldId: null,
+      enabled: true,
+    });
+    new JiraProjectRepository(db, 1).replaceForSite('site1', [
+      { projectKey: 'SECRET', projectName: 'Admin only' },
+    ]);
+    new JiraProjectRepository(db, 2).replaceForSite('site1', [
+      { projectKey: 'MINE', projectName: 'Member' },
+    ]);
+    expect(new JiraProjectRepository(db, 1).listBySite('site1').map((p) => p.projectKey)).toEqual([
+      'SECRET',
+    ]);
+    expect(new JiraProjectRepository(db, 2).listBySite('site1').map((p) => p.projectKey)).toEqual([
+      'MINE',
+    ]);
   });
 });

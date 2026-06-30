@@ -100,7 +100,9 @@ export default function notifiersRoutes(
 ): void {
   app.get(
     '/notifiers',
-    authed(() => ({ items: createNotifierConfigRepo(app.db, app.masterKey).list() })),
+    authed((req) => ({
+      items: createNotifierConfigRepo(app.db, app.masterKey, req.userId as number).list(),
+    })),
   );
 
   app.post(
@@ -108,7 +110,10 @@ export default function notifiersRoutes(
     authed((req, reply) => {
       const body = CreateSchema.parse(req.body);
       const id = randomUUID();
-      createNotifierConfigRepo(app.db, app.masterKey).put(id, createInput(body));
+      createNotifierConfigRepo(app.db, app.masterKey, req.userId as number).put(
+        id,
+        createInput(body),
+      );
       return reply.code(201).send({ id, type: body.type, name: body.name, enabled: true });
     }),
   );
@@ -117,7 +122,7 @@ export default function notifiersRoutes(
     '/notifiers/:id',
     authed((req, reply) => {
       const { id } = z.object({ id: z.string() }).parse(req.params);
-      const repo = createNotifierConfigRepo(app.db, app.masterKey);
+      const repo = createNotifierConfigRepo(app.db, app.masterKey, req.userId as number);
       const existing = repo.get(id);
       const body = PutSchema.parse(req.body);
       // For an existing record, reject fields that do not belong to its type so a
@@ -142,7 +147,7 @@ export default function notifiersRoutes(
     '/notifiers/:id',
     authed((req, reply) => {
       const { id } = z.object({ id: z.string() }).parse(req.params);
-      createNotifierConfigRepo(app.db, app.masterKey).delete(id);
+      createNotifierConfigRepo(app.db, app.masterKey, req.userId as number).delete(id);
       return reply.code(204).send();
     }),
   );
@@ -151,7 +156,7 @@ export default function notifiersRoutes(
     '/notifiers/:id/test',
     authed(async (req, reply) => {
       const { id } = z.object({ id: z.string() }).parse(req.params);
-      const full = createNotifierConfigRepo(app.db, app.masterKey).get(id);
+      const full = createNotifierConfigRepo(app.db, app.masterKey, req.userId as number).get(id);
       if (!full) return reply.code(404).send({ error: 'notifier not found' });
       try {
         if (full.type === 'smtp') {

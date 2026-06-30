@@ -25,7 +25,7 @@ export function runImportYaml(opts: {
 }): ImportYamlResult {
   const cfg = loadConfig(opts.configPath, opts.env);
 
-  createSourceConfigRepo(opts.db).putGithub({
+  createSourceConfigRepo(opts.db, 1).putGithub({
     enabled: true,
     repos: cfg.sources.github.repos,
     rules: cfg.sources.github.rules,
@@ -39,7 +39,7 @@ export function runImportYaml(opts: {
     accountLogin: cfg.user.githubLogin,
   });
 
-  const notifiers = createNotifierConfigRepo(opts.db, opts.key);
+  const notifiers = createNotifierConfigRepo(opts.db, opts.key, 1);
   for (const n of cfg.notifications) {
     notifiers.put(n.id, {
       enabled: n.enabled,

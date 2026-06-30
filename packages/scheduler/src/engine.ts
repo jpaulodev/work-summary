@@ -4,6 +4,7 @@ import { isValidCron, nextDelayMs, nextOccurrences } from './cron.js';
 export interface ScheduleEngineDeps {
   scheduleRepo: ScheduleRepository;
   runScan: (opts: {
+    userId: number;
     triggeredBy: string;
     reposFilter?: string[] | null;
   }) => Promise<{ runId: number }>;
@@ -94,6 +95,7 @@ export class ScheduleEngine {
     const nextRun = this.nextRunIso(s.cronExpression, s.timezone);
     try {
       const result = await this.deps.runScan({
+        userId: s.userId,
         triggeredBy: `schedule:${s.id}`,
         reposFilter: s.reposFilter,
       });

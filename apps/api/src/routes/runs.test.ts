@@ -18,7 +18,7 @@ describe('runs routes', () => {
   });
 
   it('returns runs newest first', async () => {
-    const runs = createRunsRepo(db, () => new Date('2026-06-01T00:00:00Z'));
+    const runs = createRunsRepo(db, 1, () => new Date('2026-06-01T00:00:00Z'));
     const id1 = runs.startRun();
     runs.finishRun(id1, 'success', { commentsFound: 3, commentsNotified: 1 });
     const id2 = runs.startRun();

@@ -17,7 +17,7 @@ describe('loadConfigFromDb', () => {
 
     expect(hasDbConfig(db)).toBe(false);
 
-    createSourceConfigRepo(db).putGithub({
+    createSourceConfigRepo(db, 1).putGithub({
       enabled: true,
       repos: ['org/a', 'org/b'],
       rules: {
@@ -34,7 +34,7 @@ describe('loadConfigFromDb', () => {
       accessToken: 'ghp_db_token',
       accountLogin: 'me',
     });
-    createNotifierConfigRepo(db, key).put('primary-email', {
+    createNotifierConfigRepo(db, key, 1).put('primary-email', {
       enabled: true,
       host: 'smtp.test',
       port: 587,

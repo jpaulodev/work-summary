@@ -16,7 +16,7 @@ beforeEach(() => {
 
 describe('CommentReplyRepository', () => {
   it('inserts and lists replies ordered by sent_at', () => {
-    const repo = new CommentReplyRepository(db);
+    const repo = new CommentReplyRepository(db, 1);
     repo.insert({
       commentId: 'c1',
       body: 'first',
@@ -37,7 +37,7 @@ describe('CommentReplyRepository', () => {
   });
 
   it('cascade-deletes replies when the comment is removed', () => {
-    const repo = new CommentReplyRepository(db);
+    const repo = new CommentReplyRepository(db, 1);
     repo.insert({
       commentId: 'c1',
       body: 'x',

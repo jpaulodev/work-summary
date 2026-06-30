@@ -69,20 +69,24 @@ function isNotifierType(t: string): t is NotifierType {
   return t === 'smtp' || t === 'slack' || t === 'teams';
 }
 
-export function createNotifierConfigRepo(db: SqliteDatabase, key: Buffer): NotifierConfigRepo {
+export function createNotifierConfigRepo(
+  db: SqliteDatabase,
+  key: Buffer,
+  userId: number,
+): NotifierConfigRepo {
   const all = db.prepare(
-    'SELECT id, type, enabled, config_json, secret_ciphertext FROM notifier_config',
+    'SELECT id, type, enabled, config_json, secret_ciphertext FROM notifier_config WHERE user_id = ?',
   );
   const getOne = db.prepare(
-    'SELECT id, type, enabled, config_json, secret_ciphertext, secret_nonce FROM notifier_config WHERE id = ?',
+    'SELECT id, type, enabled, config_json, secret_ciphertext, secret_nonce FROM notifier_config WHERE id = ? AND user_id = ?',
   );
   const upsert = db.prepare(
-    `INSERT INTO notifier_config (id, type, enabled, config_json, secret_ciphertext, secret_nonce)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT(id) DO UPDATE SET type = excluded.type, enabled = excluded.enabled,
+    `INSERT INTO notifier_config (id, user_id, type, enabled, config_json, secret_ciphertext, secret_nonce)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(user_id, id) DO UPDATE SET type = excluded.type, enabled = excluded.enabled,
        config_json = excluded.config_json, secret_ciphertext = excluded.secret_ciphertext, secret_nonce = excluded.secret_nonce`,
   );
-  const del = db.prepare('DELETE FROM notifier_config WHERE id = ?');
+  const del = db.prepare('DELETE FROM notifier_config WHERE id = ? AND user_id = ?');
 
   const record = (id: string, type: string, enabled: number, c: ConfigJson): NotifierRecord => ({
     id,
@@ -99,7 +103,7 @@ export function createNotifierConfigRepo(db: SqliteDatabase, key: Buffer): Notif
 
   const repo: NotifierConfigRepo = {
     list() {
-      const rows = all.all() as Array<{
+      const rows = all.all(userId) as Array<{
         id: string;
         type: string;
         enabled: number;
@@ -112,7 +116,7 @@ export function createNotifierConfigRepo(db: SqliteDatabase, key: Buffer): Notif
       }));
     },
     get(id) {
-      const r = getOne.get(id) as
+      const r = getOne.get(id, userId) as
         | {
             id: string;
             type: string;
@@ -154,10 +158,10 @@ export function createNotifierConfigRepo(db: SqliteDatabase, key: Buffer): Notif
       };
       const enc = encryptSecret(JSON.stringify(secret), key);
       const enabled = (input.enabled ?? existing?.enabled ?? true) ? 1 : 0;
-      upsert.run(id, type, enabled, JSON.stringify(cfg), enc.ciphertext, enc.nonce);
+      upsert.run(id, userId, type, enabled, JSON.stringify(cfg), enc.ciphertext, enc.nonce);
     },
     delete(id) {
-      del.run(id);
+      del.run(id, userId);
     },
   };
   return repo;

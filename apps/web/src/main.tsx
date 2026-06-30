@@ -5,16 +5,19 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from './lib/query-client';
 import Layout from './routes/layout';
 import Login from './routes/login';
+import Register from './routes/register';
 import Dashboard from './routes/dashboard';
 import Sources from './routes/sources';
 import Notifications from './routes/notifications';
 import Runs from './routes/runs';
 import Schedules from './routes/schedules';
+import Team from './routes/team';
 import Settings from './routes/settings';
 import './index.css';
 
 const router = createBrowserRouter([
   { path: '/login', element: <Login /> },
+  { path: '/register', element: <Register /> },
   {
     path: '/',
     element: <Layout />,
@@ -24,6 +27,7 @@ const router = createBrowserRouter([
       { path: 'notifications', element: <Notifications /> },
       { path: 'runs', element: <Runs /> },
       { path: 'schedules', element: <Schedules /> },
+      { path: 'team', element: <Team /> },
       { path: 'settings', element: <Settings /> },
     ],
   },

@@ -21,23 +21,36 @@ interface RawReply {
 }
 
 export class CommentReplyRepository {
-  constructor(private readonly db: SqliteDatabase) {}
+  constructor(
+    private readonly db: SqliteDatabase,
+    private readonly userId: number,
+  ) {}
 
   insert(row: Omit<CommentReplyRow, 'id'>): CommentReplyRow {
     const info = this.db
       .prepare(
-        `INSERT INTO comment_reply (comment_id, body, sent_at, source, source_response_id, source_url)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO comment_reply (user_id, comment_id, body, sent_at, source, source_response_id, source_url)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(row.commentId, row.body, row.sentAt, row.source, row.sourceResponseId, row.sourceUrl);
+      .run(
+        this.userId,
+        row.commentId,
+        row.body,
+        row.sentAt,
+        row.source,
+        row.sourceResponseId,
+        row.sourceUrl,
+      );
     return { id: Number(info.lastInsertRowid), ...row };
   }
 
   listByComment(commentId: string): CommentReplyRow[] {
     return (
       this.db
-        .prepare('SELECT * FROM comment_reply WHERE comment_id = ? ORDER BY sent_at ASC, id ASC')
-        .all(commentId) as RawReply[]
+        .prepare(
+          'SELECT * FROM comment_reply WHERE user_id = ? AND comment_id = ? ORDER BY sent_at ASC, id ASC',
+        )
+        .all(this.userId, commentId) as RawReply[]
     ).map((r) => ({
       id: r.id,
       commentId: r.comment_id,

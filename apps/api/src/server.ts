@@ -17,13 +17,9 @@ import schedulesRoutes from './routes/schedules.js';
 import jiraRoutes from './routes/jira.js';
 import repliesRoutes from './routes/replies.js';
 import oauthRoutes from './routes/oauth.js';
+import invitesRoutes from './routes/invites.js';
 import { triggerScan } from './scan-runner.js';
-import {
-  ScheduleRepository,
-  JiraSiteRepository,
-  JiraProjectRepository,
-  type SqliteDatabase,
-} from '@work-summary/storage';
+import { ScheduleRepository, type SqliteDatabase } from '@work-summary/storage';
 import { ScheduleEngine } from '@work-summary/scheduler';
 
 export interface ServerDeps {
@@ -39,10 +35,7 @@ declare module 'fastify' {
     masterKey: Buffer;
     sessionSecret: Buffer;
     now: () => Date;
-    scheduleRepo: ScheduleRepository;
     scheduleEngine: ScheduleEngine;
-    jiraSiteRepo: JiraSiteRepository;
-    jiraProjectRepo: JiraProjectRepository;
   }
 }
 
@@ -66,16 +59,15 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   app.decorate('sessionSecret', deps.sessionSecret);
   app.decorate('now', deps.now);
 
-  const scheduleRepo = new ScheduleRepository(deps.db);
+  // The engine needs a cross-user view (userId = null) so it can fire every
+  // user's schedules; routes construct their own per-user ScheduleRepository.
+  const scheduleRepo = new ScheduleRepository(deps.db, null);
   const scheduleEngine = new ScheduleEngine({
     scheduleRepo,
     runScan: (o) => triggerScan(app, o),
     logger: { error: (msg, err) => process.stderr.write(`${msg}: ${String(err)}\n`) },
   });
-  app.decorate('scheduleRepo', scheduleRepo);
   app.decorate('scheduleEngine', scheduleEngine);
-  app.decorate('jiraSiteRepo', new JiraSiteRepository(deps.db));
-  app.decorate('jiraProjectRepo', new JiraProjectRepository(deps.db));
   scheduleEngine.start();
   app.addHook('onClose', (_instance, hookDone) => {
     scheduleEngine.stop();
@@ -96,6 +88,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(jiraRoutes, { prefix: '/api' });
   await app.register(repliesRoutes, { prefix: '/api' });
   await app.register(oauthRoutes, { prefix: '/api' });
+  await app.register(invitesRoutes, { prefix: '/api' });
 
   if (process.env.NODE_ENV === 'production') {
     const webDist = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'web', 'dist');
