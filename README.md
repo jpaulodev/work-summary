@@ -95,14 +95,46 @@ For macOS, prefer `launchd` (see `man launchd.plist`).
 - **Emails arriving repeatedly** - the dedup table is per state DB. Do not delete `~/.local/state/work-summary/state.db` unless you want to replay.
 - **No comments matched but you expected some** - check that the repo is listed in `sources.github.repos` and that at least one rule is enabled.
 
+## Web UI + API (Phase 2)
+
+Phase 2 adds a web dashboard to triage the comments the scanner collects, plus a REST API
+and DB-backed configuration. The CLI keeps working unchanged and shares the same SQLite DB.
+
+```bash
+# 1. Build everything
+pnpm build
+
+# 2. Import your existing YAML config into the encrypted DB (one time)
+export MASTER_PASSPHRASE='a-long-passphrase'   # encrypts tokens/SMTP creds at rest
+work-summary import-yaml
+
+# 3. Start the API (serves the built SPA in production)
+export MASTER_PASSPHRASE='a-long-passphrase'
+NODE_ENV=production node apps/api/dist/bin.js   # http://127.0.0.1:3001
+
+# 4. Bootstrap your login (first run prints the exact curl command), then open the UI
+```
+
+In development, run the API on `:3001` and the Vite dev server on `:5173`
+(`pnpm --filter @work-summary/web dev`); Vite proxies `/api` to the API.
+
+**Features:** session-cookie login (argon2id), a premium dashboard with status filters
+(pending / addressed / resolved / snoozed) and per-comment actions, a Sources screen
+(write-only GitHub token, repo list, rule toggles), an SMTP Notifications screen with a
+test button, a Runs table with a "Run now" trigger, and AES-256-GCM encryption for all
+secrets at rest. See
+[`docs/superpowers/specs/2026-06-29-phase2-web-ui-api-auth.md`](docs/superpowers/specs/2026-06-29-phase2-web-ui-api-auth.md).
+
+An end-to-end smoke test lives in [`e2e/`](e2e) (Playwright; run manually with a seeded DB).
+
 ## Architecture
 
-See [`docs/superpowers/specs/2026-06-29-phase1-core-scanner-design.md`](docs/superpowers/specs/2026-06-29-phase1-core-scanner-design.md) for the full design.
+See [`docs/superpowers/specs/2026-06-29-phase1-core-scanner-design.md`](docs/superpowers/specs/2026-06-29-phase1-core-scanner-design.md) for the full Phase 1 design.
 
 ```
-apps/cli  ->  github-source ->  core
-   |      ->  notifiers     ->  core
-   |      ->  storage       ->  core
+apps/cli  ->  github-source ->  core        apps/api ->  auth, config-db, storage,
+   |      ->  notifiers     ->  core           |          github-source, notifiers
+   |      ->  storage       ->  core           `->  apps/web (React SPA)
    `->  core
 ```
 
