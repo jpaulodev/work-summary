@@ -16,9 +16,17 @@ interface ConfigJson {
   filters: BotFilterConfig;
 }
 
+export interface GithubSourceConfigInput {
+  enabled?: boolean | undefined;
+  token?: string | undefined;
+  repos?: string[] | undefined;
+  rules?: MatchRulesConfig | undefined;
+  filters?: BotFilterConfig | undefined;
+}
+
 export interface SourceConfigRepo {
   getGithub(): GithubSourceConfig | null;
-  putGithub(input: Partial<GithubSourceConfig>): void;
+  putGithub(input: GithubSourceConfigInput): void;
 }
 
 const DEFAULT_RULES: MatchRulesConfig = {

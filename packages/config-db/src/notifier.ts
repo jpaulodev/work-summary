@@ -22,10 +22,23 @@ export interface NotifierListItem extends NotifierRecord {
   hasSecret: boolean;
 }
 
+export interface NotifierInput {
+  enabled?: boolean | undefined;
+  host?: string | undefined;
+  port?: number | undefined;
+  secure?: boolean | undefined;
+  from?: string | undefined;
+  to?: string | undefined;
+  subjectTemplate?: string | undefined;
+  type?: 'smtp' | undefined;
+  user?: string | undefined;
+  pass?: string | undefined;
+}
+
 export interface NotifierConfigRepo {
   list(): NotifierListItem[];
   get(id: string): NotifierWithSecret | null;
-  put(id: string, input: Partial<NotifierWithSecret> & { type?: 'smtp' }): void;
+  put(id: string, input: NotifierInput): void;
   delete(id: string): void;
 }
 

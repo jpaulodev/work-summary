@@ -1,7 +1,7 @@
 import * as argon2 from 'argon2';
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 
-export async function deriveMasterKey(passphrase: string, salt: Buffer): Promise<Buffer> {
+export function deriveMasterKey(passphrase: string, salt: Buffer): Promise<Buffer> {
   return argon2.hash(passphrase, {
     type: argon2.argon2id,
     salt,
@@ -10,7 +10,7 @@ export async function deriveMasterKey(passphrase: string, salt: Buffer): Promise
     timeCost: 3,
     memoryCost: 2 ** 16,
     parallelism: 1,
-  }) as Promise<Buffer>;
+  });
 }
 
 export function encryptSecret(
