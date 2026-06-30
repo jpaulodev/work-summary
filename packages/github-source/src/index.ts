@@ -7,6 +7,8 @@ export { fetchMentionedContainers } from './fetch-mentions.js';
 export type { MentionRef, FetchMentionsOptions } from './fetch-mentions.js';
 export { GithubSource } from './source.js';
 export type { Source, FetchOptions } from './source.js';
+export { listAccessibleRepos } from './repos.js';
+export type { AccessibleRepo } from './repos.js';
 export { parseGithubCommentUrl } from './reply-url.js';
 export type { GithubCommentLocation } from './reply-url.js';
 export { postGithubReply, ReplyScopeError } from './reply.js';

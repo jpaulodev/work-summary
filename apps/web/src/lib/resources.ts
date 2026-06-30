@@ -31,6 +31,20 @@ export function useDisconnectOAuth() {
   });
 }
 
+export interface GithubRepo {
+  fullName: string;
+  private: boolean;
+}
+
+export function useGithubRepos(enabled: boolean) {
+  return useQuery({
+    queryKey: ['github-repos'],
+    queryFn: () => api.get<{ repos: GithubRepo[] }>('/sources/github/repos'),
+    enabled,
+    staleTime: 5 * 60_000,
+  });
+}
+
 // Notifiers
 export function useNotifiers() {
   return useQuery({
