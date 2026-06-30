@@ -49,7 +49,7 @@ export default function jiraRoutes(app: FastifyInstance, _opts: unknown, done: (
    * the developer-field setting, removing any stale rows from earlier installs.
    */
   function ensureSite(): JiraSiteRow | null {
-    const conn = createOAuthConnectionService(app.db, app.masterKey).getView(1, 'jira');
+    const conn = createOAuthConnectionService(app.db, app.masterKey, app.now).getView(1, 'jira');
     if (!conn || !conn.cloudId) return null;
     const id = conn.cloudId;
     for (const s of app.jiraSiteRepo.list()) {

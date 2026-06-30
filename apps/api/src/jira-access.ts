@@ -33,31 +33,39 @@ export async function getValidJiraAccess(
   if (expired && tokens.refreshToken) {
     const creds = oauthClientCredentials('jira');
     if (creds) {
-      const refreshed = await refreshAccessToken('jira', {
-        clientId: creds.clientId,
-        clientSecret: creds.clientSecret,
-        refreshToken: tokens.refreshToken,
-      });
-      const expiresAt =
-        refreshed.expiresIn != null
-          ? new Date(app.now().getTime() + refreshed.expiresIn * 1000).toISOString()
-          : null;
-      svc.save(userId, 'jira', {
-        accessToken: refreshed.accessToken,
-        // Atlassian rotates refresh tokens; keep the new one, falling back to the old.
-        refreshToken: refreshed.refreshToken ?? tokens.refreshToken,
-        expiresAt,
-        accountId: tokens.accountId,
-        accountLogin: tokens.accountLogin,
-        cloudId: tokens.cloudId,
-        siteUrl: tokens.siteUrl,
-        scopes: refreshed.scopes ?? tokens.scopes,
-      });
-      return {
-        accessToken: refreshed.accessToken,
-        cloudId: tokens.cloudId,
-        siteUrl: tokens.siteUrl ?? '',
-      };
+      try {
+        const refreshed = await refreshAccessToken('jira', {
+          clientId: creds.clientId,
+          clientSecret: creds.clientSecret,
+          refreshToken: tokens.refreshToken,
+        });
+        const expiresAt =
+          refreshed.expiresIn != null
+            ? new Date(app.now().getTime() + refreshed.expiresIn * 1000).toISOString()
+            : null;
+        svc.save(userId, 'jira', {
+          accessToken: refreshed.accessToken,
+          // Atlassian rotates refresh tokens; keep the new one, falling back to the old.
+          refreshToken: refreshed.refreshToken ?? tokens.refreshToken,
+          expiresAt,
+          accountId: tokens.accountId,
+          accountLogin: tokens.accountLogin,
+          cloudId: tokens.cloudId,
+          siteUrl: tokens.siteUrl,
+          scopes: refreshed.scopes ?? tokens.scopes,
+        });
+        return {
+          accessToken: refreshed.accessToken,
+          cloudId: tokens.cloudId,
+          siteUrl: tokens.siteUrl ?? '',
+        };
+      } catch (err) {
+        // A revoked/expired refresh token must not crash the scan or a request.
+        // Fall through to the stale token (best-effort); the downstream JIRA call
+        // will surface a 401 that callers already handle (scan is best-effort,
+        // reply -> 502). The user reconnects JIRA to recover.
+        app.log.warn({ err }, 'jira token refresh failed; using stale access token');
+      }
     }
   }
 

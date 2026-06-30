@@ -106,6 +106,39 @@ describe('/api/jira', () => {
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/ex/jira/cloud-1/');
   });
 
+  it('falls back to the stale token (no crash) when refresh fails', async () => {
+    // Connect with an already-expired token so a refresh is attempted.
+    createOAuthConnectionService(db, TEST_KEY).save(1, 'jira', {
+      accessToken: 'stale_at',
+      refreshToken: 'rt',
+      expiresAt: '2020-01-01T00:00:00Z',
+      cloudId: 'cloud-1',
+      siteUrl: 'https://acme.atlassian.net',
+    });
+    vi.stubEnv('JIRA_OAUTH_CLIENT_ID', 'cid');
+    vi.stubEnv('JIRA_OAUTH_CLIENT_SECRET', 'sec');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string) => {
+        // Refresh endpoint fails (revoked refresh token)...
+        if (String(url).includes('auth.atlassian.com/oauth/token'))
+          return Promise.resolve(new Response('revoked', { status: 400 }));
+        // ...but the stale access token still answers the project search.
+        return Promise.resolve(
+          new Response(JSON.stringify({ values: [{ key: 'WS', name: 'Work' }] }), { status: 200 }),
+        );
+      }),
+    );
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/jira/site/projects/discover',
+      headers: { cookie },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json<Array<{ key: string }>>()[0]?.key).toBe('WS');
+    vi.unstubAllEnvs();
+  });
+
   it('disconnects, clearing the connection and the site', async () => {
     connectJira();
     await app.inject({ method: 'GET', url: '/api/jira/site', headers: { cookie } });
