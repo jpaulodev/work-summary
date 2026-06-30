@@ -55,7 +55,36 @@ export function useUpdateNotifier() {
 
 export function useTestNotifier() {
   return useMutation({
-    mutationFn: (id: string) => api.post<{ ok: boolean }>(`/notifiers/${id}/test`),
+    mutationFn: (id: string) => api.post<{ ok: boolean; error?: string }>(`/notifiers/${id}/test`),
+  });
+}
+
+export type CreateNotifierInput =
+  | {
+      type: 'smtp';
+      name: string;
+      host: string;
+      port: number;
+      secure: boolean;
+      from: string;
+      to: string;
+      secret: { user: string; pass: string };
+    }
+  | { type: 'slack' | 'teams'; name: string; webhookUrl: string };
+
+export function useCreateNotifier() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateNotifierInput) => api.post<{ id: string }>('/notifiers', input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['notifiers'] }),
+  });
+}
+
+export function useDeleteNotifier() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.del<void>(`/notifiers/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['notifiers'] }),
   });
 }
 

@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify';
-import { runScan, loadConfigFromDb } from '@work-summary/cli';
+import { runScan, type Config } from '@work-summary/cli';
 import { createOctokit, GithubSource, type Source } from '@work-summary/github-source';
 import { JiraSource } from '@work-summary/jira-source';
-import { SmtpNotifier } from '@work-summary/notifiers';
 import { decryptSecret } from '@work-summary/auth';
+import { createSourceConfigRepo, createNotifierConfigRepo } from '@work-summary/config-db';
 import {
   createCommentsRepo,
   createRunsRepo,
@@ -13,6 +13,7 @@ import {
 } from '@work-summary/storage';
 import type { PendingComment } from '@work-summary/core';
 import pino from 'pino';
+import { buildNotifier, buildCompositeNotifier } from './notifier-factory.js';
 
 /**
  * A Source that fans out to GitHub and (if any sites are configured) JIRA,
@@ -72,15 +73,48 @@ export async function triggerScan(
   if (running) throw new Error('already-running');
   running = true;
   try {
-    // Reuse the same DB-backed config builder the CLI uses so the two stay in sync.
-    const config = loadConfigFromDb(app.db, app.masterKey, process.env.GITHUB_LOGIN ?? '');
-    if (opts.reposFilter && opts.reposFilter.length > 0) {
-      config.sources.github.repos = opts.reposFilter;
-    }
-    const notif = config.notifications.find((n) => n.enabled);
-    if (!notif) throw new Error('no enabled notifier');
+    const logger = pino({ level: 'info' });
+    const gh = createSourceConfigRepo(app.db, app.masterKey).getGithub();
+    if (!gh) throw new Error('No source config in DB');
 
-    const githubSource = new GithubSource(createOctokit({ token: config.sources.github.token }));
+    // Build a notifier per enabled config (smtp/slack/teams) and fan out to all.
+    const notifRepo = createNotifierConfigRepo(app.db, app.masterKey);
+    const fulls = notifRepo
+      .list()
+      .filter((n) => n.enabled)
+      .map((n) => notifRepo.get(n.id))
+      .filter((n): n is NonNullable<typeof n> => n !== null);
+    if (fulls.length === 0) throw new Error('no enabled notifier');
+    const composite = buildCompositeNotifier(
+      fulls.map((f) => ({ id: f.id, notifier: buildNotifier(f) })),
+      logger,
+    );
+    const subjectTemplate =
+      fulls.find((f) => f.type === 'smtp')?.subjectTemplate ??
+      '[work-summary] {{count}} - {{date}}';
+
+    const repos = opts.reposFilter && opts.reposFilter.length > 0 ? opts.reposFilter : gh.repos;
+    const config: Config = {
+      user: { githubLogin: process.env.GITHUB_LOGIN ?? '' },
+      sources: { github: { token: gh.token, repos, rules: gh.rules, filters: gh.filters } },
+      scan: { lookbackDays: 7, concurrency: 3 },
+      // A single synthetic enabled entry carries the subject template; the actual
+      // delivery goes to the composite notifier in deps below.
+      notifications: [
+        {
+          id: 'all',
+          type: 'smtp',
+          enabled: true,
+          smtp: { host: '', port: 587, secure: false, user: '', pass: '' },
+          from: '',
+          to: '',
+          subjectTemplate,
+        },
+      ],
+      logging: { level: 'info', file: '/tmp/api-scan.log' },
+    };
+
+    const githubSource = new GithubSource(createOctokit({ token: gh.token }));
     const since = new Date(Date.now() - config.scan.lookbackDays * 24 * 60 * 60 * 1000);
     const result = await runScan({
       config,
@@ -90,8 +124,8 @@ export async function triggerScan(
         runsRepo: createRunsRepo(app.db, () => new Date()),
         watermarksRepo: createWatermarksRepo(app.db),
         source: buildCompositeSource(app, githubSource, since, config.scan.lookbackDays),
-        notifier: new SmtpNotifier({ ...notif.smtp, from: notif.from, to: notif.to }),
-        logger: pino({ level: 'info' }),
+        notifier: composite,
+        logger,
       },
       dryRun: false,
       now: () => new Date(),

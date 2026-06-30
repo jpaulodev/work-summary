@@ -63,9 +63,12 @@ export interface GithubSource {
   hasToken: boolean;
 }
 
+export type NotifierType = 'smtp' | 'slack' | 'teams';
+
 export interface NotifierItem {
   id: string;
-  type: 'smtp';
+  type: NotifierType;
+  name: string;
   enabled: boolean;
   host: string;
   port: number;
