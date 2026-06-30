@@ -166,6 +166,25 @@ In dev, register the GitHub OAuth callback as `http://localhost:5173/api/oauth/g
 An end-to-end smoke test lives in [`e2e/`](e2e) (Playwright; run manually against a
 seeded DB).
 
+### Updating / deploying
+
+Database migrations run **automatically when the API starts** — there is no manual
+migration command. So picking up new changes is just: pull, rebuild, restart. A
+long-running process that is never restarted will keep the old code _and_ the old schema,
+which is the usual cause of "it worked on my machine but errors after an update".
+
+On a deploy machine, one command does the whole cycle (pull → install → build → start;
+migrations apply on startup):
+
+```bash
+pnpm deploy           # = bin/deploy.sh: git pull, pnpm install, pnpm build, start the API
+pnpm deploy --no-pull # build + start only (skip git pull)
+```
+
+On startup the API prints `applied database migrations: …` when it applies any, so you can
+confirm the schema is current. To run it under a process manager, point the manager at
+`node apps/api/dist/bin.js` (or `pnpm start`) after a build.
+
 ---
 
 ## Matching rules
