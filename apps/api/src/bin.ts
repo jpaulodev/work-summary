@@ -30,7 +30,10 @@ async function main(): Promise<void> {
   }
 
   const db = openDatabase(dbPath());
-  runMigrations(db);
+  const { applied } = runMigrations(db);
+  if (applied.length > 0) {
+    process.stdout.write(`applied database migrations: ${applied.join(', ')}\n`);
+  }
 
   const masterKey = hasMasterSecret(db)
     ? await loadMasterKey(db, passphrase)
