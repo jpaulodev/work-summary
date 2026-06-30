@@ -1,0 +1,73 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 240 20% 99%;
+    --foreground: 222 32% 12%;
+    --muted: 240 18% 96%;
+    --muted-foreground: 222 12% 45%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 32% 12%;
+    --border: 240 16% 90%;
+    --input: 240 16% 88%;
+    --ring: 245 80% 60%;
+    --primary: 245 75% 58%;
+    --primary-foreground: 0 0% 100%;
+    --accent: 245 70% 96%;
+    --accent-foreground: 245 75% 40%;
+    --success: 152 60% 42%;
+    --warning: 38 92% 50%;
+    --danger: 0 72% 55%;
+    --radius: 0.85rem;
+  }
+
+  .dark {
+    --background: 224 32% 7%;
+    --foreground: 220 24% 94%;
+    --muted: 223 26% 14%;
+    --muted-foreground: 220 14% 62%;
+    --card: 224 28% 10%;
+    --card-foreground: 220 24% 94%;
+    --border: 223 22% 18%;
+    --input: 223 22% 22%;
+    --ring: 245 90% 68%;
+    --primary: 245 85% 67%;
+    --primary-foreground: 224 40% 8%;
+    --accent: 245 40% 18%;
+    --accent-foreground: 245 90% 84%;
+    --success: 152 55% 50%;
+    --warning: 38 92% 56%;
+    --danger: 0 75% 62%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: 'cv11', 'ss01';
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.2);
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  .grid-bg {
+    background-image: radial-gradient(
+      circle at 1px 1px,
+      hsl(var(--border) / 0.6) 1px,
+      transparent 0
+    );
+    background-size: 22px 22px;
+  }
+}
