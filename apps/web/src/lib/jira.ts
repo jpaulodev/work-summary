@@ -37,9 +37,12 @@ export function useJiraProjects(connected: boolean) {
   });
 }
 
-export function useDiscoverProjects() {
-  return useMutation({
-    mutationFn: () => api.get<JiraDiscoveredProject[]>('/jira/site/projects/discover'),
+export function useDiscoverableProjects(enabled: boolean) {
+  return useQuery({
+    queryKey: ['jira-projects-discover'],
+    queryFn: () => api.get<JiraDiscoveredProject[]>('/jira/site/projects/discover'),
+    enabled,
+    staleTime: 5 * 60_000,
   });
 }
 
