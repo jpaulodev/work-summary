@@ -123,7 +123,7 @@ export function useScanStatus() {
     queryFn: () => api.get<ScanStatus>('/scan/status'),
     // Keep polling while a scan is running (whoever started it - this tab, another
     // tab, or the CLI), then stop automatically once it finishes.
-    refetchInterval: (query) => (query.state.data?.running ? 2000 : false),
+    refetchInterval: (query) => (query.state.data?.running ? 1000 : false),
   });
 }
 

@@ -4,7 +4,7 @@ import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { Card } from '../components/ui/card';
 import { relativeTime } from '../lib/utils';
-import type { RunRow } from '../lib/types';
+import type { RunRow, ScanProgress } from '../lib/types';
 
 function statusTone(status: string): 'success' | 'warning' | 'danger' | 'neutral' {
   if (status === 'success') return 'success';
@@ -20,11 +20,50 @@ function duration(run: RunRow): string {
   return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
 }
 
+const PHASE_LABEL: Record<ScanProgress['phase'], string> = {
+  preparing: 'Preparing…',
+  github: 'Scanning GitHub',
+  jira: 'Scanning JIRA',
+  saving: 'Saving results…',
+};
+
+function ProgressBar({ progress }: { progress: ScanProgress }): JSX.Element {
+  const { phase, reposDone, reposTotal, commentsFound } = progress;
+  const pct =
+    reposTotal > 0 ? Math.round((reposDone / reposTotal) * 100) : phase === 'github' ? 0 : 100;
+  const detail =
+    phase === 'github' && reposTotal > 0
+      ? `${reposDone}/${reposTotal} repos`
+      : `${commentsFound} found so far`;
+  return (
+    <Card className="mb-5 p-4">
+      <div className="mb-2 flex items-center justify-between text-sm">
+        <span className="flex items-center gap-2 font-medium">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          {PHASE_LABEL[phase]}
+        </span>
+        <span className="tabular-nums text-muted-foreground">{detail}</span>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-muted">
+        <div
+          role="progressbar"
+          aria-valuenow={pct}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          className="h-full rounded-full bg-primary transition-all duration-500"
+          style={{ width: `${Math.max(pct, 4)}%` }}
+        />
+      </div>
+    </Card>
+  );
+}
+
 export default function Runs(): JSX.Element {
   const runs = useRuns();
   const trigger = useTriggerScan();
   const status = useScanStatus();
   const running = status.data?.running ?? trigger.isPending;
+  const progress = status.data?.progress;
 
   return (
     <div>
@@ -47,6 +86,8 @@ export default function Runs(): JSX.Element {
           )}
         </Button>
       </header>
+
+      {running && progress && <ProgressBar progress={progress} />}
 
       <Card className="overflow-hidden">
         <table className="w-full text-sm">
