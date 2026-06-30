@@ -43,6 +43,18 @@ export function useDiscoverProjects() {
   });
 }
 
+export interface JiraField {
+  id: string;
+  name: string;
+  custom: boolean;
+}
+
+export function useDiscoverFields() {
+  return useMutation({
+    mutationFn: () => api.get<JiraField[]>('/jira/site/fields/discover'),
+  });
+}
+
 export function useSaveProjects() {
   const qc = useQueryClient();
   return useMutation({

@@ -147,7 +147,15 @@ export default function jiraRoutes(app: FastifyInstance, _opts: unknown, done: (
       if (!access) return reply.code(412).send({ error: 'jira-not-connected' });
       const client = new JiraClient({ accessToken: access.accessToken, cloudId: access.cloudId });
       const fields = await client.listFields();
-      return fields.filter((f) => f.custom && /develop/i.test(f.name));
+      // All custom fields, sorted, with likely "developer" fields first — the
+      // field may be named in any language ("Developer", "Desenvolvedor", …).
+      return fields
+        .filter((f) => f.custom)
+        .sort((a, b) => {
+          const aDev = /develop|desenvolv/i.test(a.name) ? 0 : 1;
+          const bDev = /develop|desenvolv/i.test(b.name) ? 0 : 1;
+          return aDev - bDev || a.name.localeCompare(b.name);
+        });
     }),
   );
   done();

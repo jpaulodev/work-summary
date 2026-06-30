@@ -1,11 +1,13 @@
 import { useState } from 'react';
-import { Loader2, Plug, Search, Unplug } from 'lucide-react';
+import { Check, Loader2, Plug, Search, Unplug } from 'lucide-react';
 import {
   useJiraSite,
   useDisconnectJira,
   useJiraProjects,
   useDiscoverProjects,
   useSaveProjects,
+  useDiscoverFields,
+  useUpdateJiraSite,
 } from '../lib/jira';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
@@ -131,7 +133,80 @@ function SiteCard({ site }: { site: JiraSite }): JSX.Element {
           }
         />
       )}
+
+      <DeveloperFieldSetting site={site} />
     </Card>
+  );
+}
+
+/**
+ * Pick the custom field that marks you as the developer on a ticket. When set,
+ * the scanner also surfaces issues where that field equals your JIRA user
+ * (JQL: `"<fieldId>" = currentUser()`), on top of assignee/reporter.
+ */
+function DeveloperFieldSetting({ site }: { site: JiraSite }): JSX.Element {
+  const discover = useDiscoverFields();
+  const update = useUpdateJiraSite();
+  const fields = discover.data ?? [];
+  const currentName = fields.find((f) => f.id === site.developerFieldId)?.name;
+
+  return (
+    <div className="mt-4 border-t border-border pt-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium">Developer field</p>
+          <p className="text-xs text-muted-foreground">
+            Also scan tickets where a custom user field (e.g. “Developer”) is set to you.
+          </p>
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={discover.isPending}
+          onClick={() => discover.mutate()}
+        >
+          {discover.isPending ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Search className="h-4 w-4" />
+          )}
+          Detect fields
+        </Button>
+      </div>
+
+      <div className="mt-2 flex items-center gap-2">
+        <select
+          aria-label="Developer field"
+          value={site.developerFieldId ?? ''}
+          onChange={(e) => update.mutate({ developerFieldId: e.target.value || null })}
+          className="h-9 w-full rounded-md border border-input bg-background/60 px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <option value="">— none —</option>
+          {site.developerFieldId && !fields.some((f) => f.id === site.developerFieldId) && (
+            <option value={site.developerFieldId}>{site.developerFieldId}</option>
+          )}
+          {fields.map((f) => (
+            <option key={f.id} value={f.id}>
+              {f.name} ({f.id})
+            </option>
+          ))}
+        </select>
+        {update.isPending && <Loader2 className="h-4 w-4 shrink-0 animate-spin" />}
+        {update.isSuccess && !update.isPending && (
+          <Check className="h-4 w-4 shrink-0 text-success" />
+        )}
+      </div>
+
+      {discover.isError && (
+        <p className="mt-1 text-xs text-danger">Could not load fields. Try again.</p>
+      )}
+      {discover.isSuccess && fields.length === 0 && (
+        <p className="mt-1 text-xs text-muted-foreground">
+          No “developer” custom field found on this site.
+        </p>
+      )}
+      {currentName && <p className="mt-1 text-xs text-muted-foreground">Selected: {currentName}</p>}
+    </div>
   );
 }
 

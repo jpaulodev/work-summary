@@ -106,6 +106,31 @@ describe('/api/jira', () => {
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/ex/jira/cloud-1/');
   });
 
+  it('discovers custom fields, developer-like ones first', async () => {
+    connectJira();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify([
+            { id: 'summary', name: 'Summary', custom: false },
+            { id: 'customfield_100', name: 'Sprint', custom: true },
+            { id: 'customfield_200', name: 'Developer', custom: true },
+          ]),
+          { status: 200 },
+        ),
+      ),
+    );
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/jira/site/fields/discover',
+      headers: { cookie },
+    });
+    const body = res.json<Array<{ id: string; name: string }>>();
+    // only custom fields, Developer surfaced first
+    expect(body.map((f) => f.name)).toEqual(['Developer', 'Sprint']);
+  });
+
   it('falls back to the stale token (no crash) when refresh fails', async () => {
     // Connect with an already-expired token so a refresh is attempted.
     createOAuthConnectionService(db, TEST_KEY).save(1, 'jira', {
