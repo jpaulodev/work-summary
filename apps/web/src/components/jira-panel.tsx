@@ -1,19 +1,18 @@
-import { useState } from 'react';
-import { Check, Loader2, Plug, Search, Unplug } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Check, Loader2, Plug, RefreshCw, Search, Unplug } from 'lucide-react';
 import {
   useJiraSite,
   useDisconnectJira,
   useJiraProjects,
-  useDiscoverProjects,
+  useDiscoverableProjects,
   useSaveProjects,
   useDiscoverFields,
   useUpdateJiraSite,
 } from '../lib/jira';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
-import { Badge } from './ui/badge';
 import { cn } from '../lib/utils';
-import type { JiraDiscoveredProject, JiraSite } from '../lib/types';
+import type { JiraSite } from '../lib/types';
 
 export function JiraPanel(): JSX.Element {
   const status = useJiraSite();
@@ -49,11 +48,7 @@ export function JiraPanel(): JSX.Element {
 }
 
 function SiteCard({ site }: { site: JiraSite }): JSX.Element {
-  const projects = useJiraProjects(true);
-  const discover = useDiscoverProjects();
-  const save = useSaveProjects();
   const disconnect = useDisconnectJira();
-  const [selected, setSelected] = useState<Set<string>>(new Set());
   const host = (() => {
     try {
       return new URL(site.baseUrl).hostname;
@@ -62,14 +57,6 @@ function SiteCard({ site }: { site: JiraSite }): JSX.Element {
     }
   })();
 
-  const toggle = (key: string): void =>
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-
   return (
     <Card className="p-4">
       <div className="flex items-start justify-between gap-4">
@@ -77,65 +64,140 @@ function SiteCard({ site }: { site: JiraSite }): JSX.Element {
           <p className="text-sm font-semibold">{host}</p>
           <p className="text-xs text-muted-foreground">Connected via OAuth</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => discover.mutate()}
-            disabled={discover.isPending}
-          >
-            {discover.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Search className="h-4 w-4" />
-            )}
-            Discover projects
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            aria-label="Disconnect JIRA"
-            disabled={disconnect.isPending}
-            onClick={() => disconnect.mutate()}
-          >
-            {disconnect.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Unplug className="h-4 w-4" />
-            )}
-            Disconnect
-          </Button>
-        </div>
+        <Button
+          size="sm"
+          variant="ghost"
+          aria-label="Disconnect JIRA"
+          disabled={disconnect.isPending}
+          onClick={() => disconnect.mutate()}
+        >
+          {disconnect.isPending ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Unplug className="h-4 w-4" />
+          )}
+          Disconnect
+        </Button>
       </div>
 
-      {(projects.data?.length ?? 0) > 0 && (
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          {projects.data?.map((p) => (
-            <Badge key={p.id} tone="primary">
-              {p.projectName} ({p.projectKey})
-            </Badge>
-          ))}
-        </div>
-      )}
-
-      {discover.data && (
-        <ProjectPicker
-          discovered={discover.data}
-          selected={selected}
-          onToggle={toggle}
-          saving={save.isPending}
-          onSave={() =>
-            save.mutate(
-              discover.data
-                .filter((p) => selected.has(p.key))
-                .map((p) => ({ projectKey: p.key, projectName: p.name })),
-            )
-          }
-        />
-      )}
-
+      <JiraProjectPicker />
       <DeveloperFieldSetting site={site} />
     </Card>
+  );
+}
+
+/** Searchable checkbox list of the connected site's projects to scan. */
+function JiraProjectPicker(): JSX.Element {
+  const available = useDiscoverableProjects(true);
+  const saved = useJiraProjects(true);
+  const save = useSaveProjects();
+  const [selected, setSelected] = useState<Map<string, string>>(new Map());
+  const [query, setQuery] = useState('');
+  const [savedOk, setSavedOk] = useState(false);
+
+  // Initialize the checked set from the saved selection once it loads.
+  useEffect(() => {
+    if (saved.data) setSelected(new Map(saved.data.map((p) => [p.projectKey, p.projectName])));
+  }, [saved.data]);
+
+  const toggle = (key: string, name: string): void => {
+    setSavedOk(false);
+    setSelected((prev) => {
+      const next = new Map(prev);
+      if (next.has(key)) next.delete(key);
+      else next.set(key, name);
+      return next;
+    });
+  };
+
+  const all = available.data ?? [];
+  const known = new Set(all.map((p) => p.key));
+  // Keep selected projects that aren't in the discoverable list visible.
+  const extras = [...selected].filter(([k]) => !known.has(k)).map(([key, name]) => ({ key, name }));
+  const q = query.trim().toLowerCase();
+  const visible = [...extras, ...all].filter(
+    (p) => p.key.toLowerCase().includes(q) || p.name.toLowerCase().includes(q),
+  );
+
+  return (
+    <div className="mt-4 border-t border-border pt-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <p className="text-sm font-medium">Projects to scan</p>
+        <Button
+          size="sm"
+          disabled={save.isPending}
+          onClick={() =>
+            save.mutate(
+              [...selected].map(([projectKey, projectName]) => ({ projectKey, projectName })),
+              { onSuccess: () => setSavedOk(true) },
+            )
+          }
+        >
+          {save.isPending ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : savedOk ? (
+            <Check className="h-4 w-4" />
+          ) : null}
+          Save selection
+        </Button>
+      </div>
+
+      <div className="rounded-md border border-border">
+        <div className="flex items-center gap-2 border-b border-border p-2">
+          <Search className="ml-1 h-4 w-4 shrink-0 text-muted-foreground" />
+          <input
+            aria-label="Search projects"
+            placeholder="Search projects…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="h-8 w-full bg-transparent text-sm focus-visible:outline-none"
+          />
+          <span className="shrink-0 px-1 text-xs text-muted-foreground">
+            {selected.size} selected
+          </span>
+          <Button
+            size="icon"
+            variant="ghost"
+            aria-label="Refresh projects"
+            disabled={available.isFetching}
+            onClick={() => void available.refetch()}
+          >
+            <RefreshCw className={cn('h-4 w-4', available.isFetching && 'animate-spin')} />
+          </Button>
+        </div>
+
+        {available.isLoading ? (
+          <div className="py-10 text-center text-muted-foreground">
+            <Loader2 className="mx-auto h-5 w-5 animate-spin" />
+          </div>
+        ) : available.isError ? (
+          <p className="p-4 text-sm text-danger">Could not load projects. Try Refresh.</p>
+        ) : visible.length === 0 ? (
+          <p className="p-4 text-sm text-muted-foreground">
+            {q ? 'No projects match your search.' : 'No projects found on this site.'}
+          </p>
+        ) : (
+          <div className="max-h-72 overflow-y-auto">
+            {visible.map((p) => (
+              <label
+                key={p.key}
+                className="flex cursor-pointer items-center gap-3 px-3 py-2 text-sm hover:bg-muted"
+              >
+                <input
+                  type="checkbox"
+                  checked={selected.has(p.key)}
+                  onChange={() => toggle(p.key, p.name)}
+                  className="h-4 w-4 accent-[hsl(var(--primary))]"
+                />
+                <span className="truncate">
+                  {p.name} <span className="text-muted-foreground">({p.key})</span>
+                </span>
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -206,43 +268,6 @@ function DeveloperFieldSetting({ site }: { site: JiraSite }): JSX.Element {
         </p>
       )}
       {currentName && <p className="mt-1 text-xs text-muted-foreground">Selected: {currentName}</p>}
-    </div>
-  );
-}
-
-function ProjectPicker({
-  discovered,
-  selected,
-  onToggle,
-  saving,
-  onSave,
-}: {
-  discovered: JiraDiscoveredProject[];
-  selected: Set<string>;
-  onToggle: (key: string) => void;
-  saving: boolean;
-  onSave: () => void;
-}): JSX.Element {
-  return (
-    <div className="mt-4 border-t border-border pt-3">
-      <p className="mb-2 text-sm font-medium">Select projects to scan</p>
-      <div className="flex max-h-40 flex-col gap-1 overflow-y-auto">
-        {discovered.map((p) => (
-          <label key={p.key} className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={selected.has(p.key)}
-              onChange={() => onToggle(p.key)}
-              className="h-4 w-4 accent-[hsl(var(--primary))]"
-            />
-            {p.name} ({p.key})
-          </label>
-        ))}
-      </div>
-      <Button className="mt-3" size="sm" onClick={onSave} disabled={saving}>
-        {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-        Save selection
-      </Button>
     </div>
   );
 }

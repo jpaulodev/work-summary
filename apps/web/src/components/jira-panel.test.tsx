@@ -85,6 +85,63 @@ describe('JiraPanel', () => {
     );
   });
 
+  it('lists projects with search filter and saves the checked selection', async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes('/jira/site/projects/discover'))
+        return Promise.resolve(
+          new Response(
+            JSON.stringify([
+              { key: 'WS', name: 'Work Summary' },
+              { key: 'OPS', name: 'Operations' },
+            ]),
+            { status: 200 },
+          ),
+        );
+      if (u.endsWith('/jira/site/projects') && init?.method === 'PUT')
+        return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }));
+      if (u.includes('/jira/site/projects'))
+        return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }));
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            connected: true,
+            site: {
+              id: 'cloud-1',
+              baseUrl: 'https://acme.atlassian.net',
+              developerFieldId: null,
+              enabled: true,
+            },
+          }),
+          { status: 200 },
+        ),
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderPanel();
+
+    await screen.findByText(/Work Summary/);
+    expect(screen.getByText(/Operations/)).toBeInTheDocument();
+
+    // Filter narrows the list.
+    fireEvent.change(screen.getByRole('textbox', { name: /search projects/i }), {
+      target: { value: 'oper' },
+    });
+    expect(screen.queryByText(/Work Summary/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Operations/)).toBeInTheDocument();
+
+    // Check Operations and save -> PUT carries OPS.
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: /save selection/i }));
+    await waitFor(() => {
+      const put = fetchMock.mock.calls.find(
+        (c) => (c[1] as { method?: string } | undefined)?.method === 'PUT',
+      );
+      expect(put).toBeTruthy();
+      expect((put?.[1] as { body: string }).body).toContain('OPS');
+    });
+  });
+
   it('detects and saves the Developer custom field', async () => {
     const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
       const u = String(url);
