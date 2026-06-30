@@ -116,10 +116,13 @@ CREATE TABLE comment_reply_new (
   source_url         TEXT,
   FOREIGN KEY (user_id, comment_id) REFERENCES notified_comments_new(user_id, id) ON DELETE CASCADE
 );
+-- WHERE EXISTS drops any orphaned replies (a comment_id with no parent comment)
+-- so the new composite FK can't fail the whole migration on a dirty database.
 INSERT INTO comment_reply_new
   (id, user_id, comment_id, body, sent_at, source, source_response_id, source_url)
-  SELECT id, 1, comment_id, body, sent_at, source, source_response_id, source_url
-  FROM comment_reply;
+  SELECT r.id, 1, r.comment_id, r.body, r.sent_at, r.source, r.source_response_id, r.source_url
+  FROM comment_reply r
+  WHERE EXISTS (SELECT 1 FROM notified_comments_new n WHERE n.user_id = 1 AND n.id = r.comment_id);
 
 DROP TABLE comment_reply;
 DROP TABLE notified_comments;
@@ -158,8 +161,12 @@ CREATE TABLE jira_project_new (
   project_name TEXT NOT NULL,
   FOREIGN KEY (user_id, site_id) REFERENCES jira_site_new(user_id, id) ON DELETE CASCADE
 );
+-- WHERE EXISTS drops orphaned projects (a site_id with no jira_site row) — these
+-- accumulate if jira_site was deleted with foreign_keys OFF (e.g. the sqlite3
+-- CLI) — so the new composite FK can't fail the whole migration.
 INSERT INTO jira_project_new (id, user_id, site_id, project_key, project_name)
-  SELECT id, 1, site_id, project_key, project_name FROM jira_project;
+  SELECT p.id, 1, p.site_id, p.project_key, p.project_name FROM jira_project p
+  WHERE EXISTS (SELECT 1 FROM jira_site_new s WHERE s.user_id = 1 AND s.id = p.site_id);
 
 DROP TABLE jira_project;
 DROP TABLE jira_site;
