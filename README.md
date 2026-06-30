@@ -177,9 +177,13 @@ On a deploy machine, one command does the whole cycle (pull → install → buil
 migrations apply on startup):
 
 ```bash
-pnpm deploy           # = bin/deploy.sh: git pull, pnpm install, pnpm build, start the API
-pnpm deploy --no-pull # build + start only (skip git pull)
+./bin/deploy.sh            # git pull, pnpm install, pnpm build, start the API
+./bin/deploy.sh --no-pull  # build + start only (skip git pull)
+pnpm serve                 # same as ./bin/deploy.sh
 ```
+
+> Use `./bin/deploy.sh` or `pnpm serve` — **not** `pnpm deploy`, which is a built-in pnpm
+> command and errors with `ERR_PNPM_NOTHING_TO_DEPLOY`.
 
 On startup the API prints `applied database migrations: …` when it applies any, so you can
 confirm the schema is current. To run it under a process manager, point the manager at

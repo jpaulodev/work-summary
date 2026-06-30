@@ -4,8 +4,12 @@
 # code, installs, builds, and starts the API. Database migrations run
 # automatically on API startup, so an upgrade is just: re-run this script.
 #
-#   bin/deploy.sh            # pull, build, and start (foreground)
-#   bin/deploy.sh --no-pull  # skip git pull (build + start only)
+#   ./bin/deploy.sh            # pull, build, and start (foreground)
+#   ./bin/deploy.sh --no-pull  # skip git pull (build + start only)
+#   pnpm serve                 # same thing via the package.json script
+#
+# Note: don't use `pnpm deploy` — that's a built-in pnpm command and will error
+# with ERR_PNPM_NOTHING_TO_DEPLOY. Use `./bin/deploy.sh` or `pnpm serve`.
 #
 # Configuration comes from .env in the repo root (the API auto-loads it).
 
