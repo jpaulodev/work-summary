@@ -99,24 +99,23 @@ Everything is configured **in the UI** — no YAML required.
 # 1. Build everything (if you haven't already)
 nvm use 20 && pnpm build
 
-# 2. Required env for the API
-export MASTER_PASSPHRASE='a-long-random-passphrase'   # derives the encryption + session key
+# 2. Configure via a .env file (the API and CLI auto-load it from the repo root)
+cp .env.example .env
+#    Then edit .env and set at least:
+#      MASTER_PASSPHRASE  – long random string; derives the encryption + session key
+#      PUBLIC_BASE_URL    – base for OAuth redirects (default http://localhost:3001)
+#      PORT / WEB_PORT    – API port (3001) and Vite dev port (5173); change freely
+#      GITHUB_OAUTH_CLIENT_ID / _SECRET  – from https://github.com/settings/developers
+#                          (callback <PUBLIC_BASE_URL>/api/oauth/github/callback)
+#      JIRA_OAUTH_CLIENT_ID / _SECRET    – optional, https://developer.atlassian.com/console
+#                          (callback <PUBLIC_BASE_URL>/api/oauth/jira/callback)
 
-# 3. GitHub OAuth app credentials (register one at https://github.com/settings/developers
-#    with callback URL <PUBLIC_BASE_URL>/api/oauth/github/callback).
-export GITHUB_OAUTH_CLIENT_ID='Iv1.xxxxxxxx'
-export GITHUB_OAUTH_CLIENT_SECRET='xxxxxxxx'
-export PUBLIC_BASE_URL='http://127.0.0.1:3001'        # base for OAuth redirects (default shown)
-
-# (optional) JIRA OAuth 2.0 (3LO) app from https://developer.atlassian.com/console
-#   callback <PUBLIC_BASE_URL>/api/oauth/jira/callback; scopes read:jira-work
-#   read:jira-user write:jira-work offline_access.
-export JIRA_OAUTH_CLIENT_ID='xxxxxxxx'
-export JIRA_OAUTH_CLIENT_SECRET='xxxxxxxx'
-
-# 4. Start the API. In production it also serves the built dashboard from one origin.
-NODE_ENV=production node apps/api/dist/bin.js          # -> http://127.0.0.1:3001
+# 3. Start the API. In production it also serves the built dashboard from one origin.
+NODE_ENV=production node apps/api/dist/bin.js          # -> http://localhost:${PORT:-3001}
 ```
+
+> Prefer not to use a file? Every value can still be a real environment variable
+> (`export MASTER_PASSPHRASE=…`); `.env` is just a convenience and takes precedence when present.
 
 > The dashboard authenticates GitHub via **OAuth** — you connect your account with a
 > click; no token is pasted. Your GitHub login (used by the matching rules) is read from
@@ -148,17 +147,17 @@ Open **http://127.0.0.1:3001**, log in, then configure everything from the sideb
 
 ### Development mode
 
-Run the API and the Vite dev server separately (Vite proxies `/api` → `:3001`):
+Run the API and the Vite dev server separately. In `.env`, set
+`PUBLIC_BASE_URL=http://localhost:5173` (OAuth lands on Vite, which proxies `/api` to the
+API on `PORT`). The Vite dev server listens on `WEB_PORT` and reads the same root `.env`,
+so changing `PORT` / `WEB_PORT` is enough — the proxy follows automatically.
 
 ```bash
-# terminal 1
-export MASTER_PASSPHRASE='dev-passphrase'
-export GITHUB_OAUTH_CLIENT_ID=... GITHUB_OAUTH_CLIENT_SECRET=...
-export PUBLIC_BASE_URL='http://localhost:5173'  # OAuth lands on Vite, which proxies /api → :3001
-node apps/api/dist/bin.js                       # :3001 (omit NODE_ENV=production)
+# terminal 1 — API (omit NODE_ENV=production so Vite serves the SPA)
+node apps/api/dist/bin.js                       # :${PORT:-3001}
 
-# terminal 2
-pnpm --filter @work-summary/web dev             # :5173
+# terminal 2 — dashboard
+pnpm --filter @work-summary/web dev             # :${WEB_PORT:-5173}
 ```
 
 In dev, register the GitHub OAuth callback as `http://localhost:5173/api/oauth/github/callback`
@@ -183,6 +182,10 @@ Toggle each per source (UI Sources screen, or `sources.github.rules` in YAML):
 
 ## Environment variables
 
+Set these in a `.env` file at the repo root (`cp .env.example .env`) — the API and CLI
+auto-load it — or export them as real environment variables. See
+[`.env.example`](.env.example) for the annotated template.
+
 | Var                                                     | Used by   | Purpose                                                                                                         |
 | ------------------------------------------------------- | --------- | --------------------------------------------------------------------------------------------------------------- |
 | `GITHUB_TOKEN`                                          | CLI       | GitHub PAT (`repo` + `read:user`). In the dashboard the token is stored encrypted in the DB instead.            |
@@ -190,8 +193,9 @@ Toggle each per source (UI Sources screen, or `sources.github.rules` in YAML):
 | `MASTER_PASSPHRASE`                                     | API       | Derives the AES-256-GCM master key and session secret. Required to start the API. Use the same value every run. |
 | `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET` | API       | GitHub OAuth App credentials for the "Connect GitHub" flow.                                                     |
 | `JIRA_OAUTH_CLIENT_ID` / `JIRA_OAUTH_CLIENT_SECRET`     | API       | Atlassian OAuth 2.0 (3LO) credentials for the "Connect JIRA" flow.                                              |
-| `PUBLIC_BASE_URL`                                       | API       | Base URL used to build OAuth redirect URIs (default `http://127.0.0.1:3001`).                                   |
-| `PORT`                                                  | API       | API port (default `3001`).                                                                                      |
+| `PUBLIC_BASE_URL`                                       | API       | Base URL used to build OAuth redirect URIs (default `http://localhost:3001`).                                   |
+| `PORT`                                                  | API + web | API port (default `3001`); the Vite dev proxy targets it automatically.                                         |
+| `WEB_PORT`                                              | web       | Vite dev-server port (default `5173`).                                                                          |
 | `NODE_ENV=production`                                   | API       | Also serve the built dashboard from the API origin.                                                             |
 | `XDG_STATE_HOME`                                        | CLI + API | Override the state dir (default `~/.local/state`); both share `…/work-summary/state.db`.                        |
 
