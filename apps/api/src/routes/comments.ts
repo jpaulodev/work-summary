@@ -37,16 +37,23 @@ export default function commentsRoutes(
         params.push(q.author);
       }
       if (q.rule) {
-        wheres.push('nc.matched_rules LIKE ?');
-        params.push(`%${q.rule}%`);
+        // matched_rules is a JSON array string e.g. ["mentioned","assignee"]; match
+        // the exact quoted token so rule=mention does not match "mentioned", and
+        // escape LIKE metacharacters in the user value.
+        wheres.push("nc.matched_rules LIKE ? ESCAPE '\\'");
+        params.push(`%"${escapeLike(q.rule)}"%`);
       }
       if (q.status !== 'all') {
         wheres.push("COALESCE(cs.status,'pending') = ?");
         params.push(q.status);
       }
+      // Cursor is "<notified_at>|<id>": a composite keyset over the (notified_at, id)
+      // unique ordering, so rows sharing a notified_at (same scan batch) are not
+      // skipped across pages.
       if (q.cursor) {
-        wheres.push('nc.notified_at < ?');
-        params.push(q.cursor);
+        const [cursorAt, cursorId] = splitCursor(q.cursor);
+        wheres.push('(nc.notified_at < ? OR (nc.notified_at = ? AND nc.id < ?))');
+        params.push(cursorAt, cursorAt, cursorId);
       }
       const sql = `SELECT nc.id, nc.source, nc.repo, nc.container_type AS containerType,
         nc.container_number AS containerNumber, nc.comment_native_id AS commentId,
@@ -54,7 +61,7 @@ export default function commentsRoutes(
         COALESCE(cs.status,'pending') AS status, cs.note, cs.snoozed_until AS snoozedUntil
       FROM notified_comments nc LEFT JOIN comment_status cs ON cs.comment_id = nc.id
       ${wheres.length ? 'WHERE ' + wheres.join(' AND ') : ''}
-      ORDER BY nc.notified_at DESC LIMIT ?`;
+      ORDER BY nc.notified_at DESC, nc.id DESC LIMIT ?`;
       params.push(q.limit + 1);
       const rows = app.db.prepare(sql).all(...params) as Array<Record<string, unknown>>;
       const hasMore = rows.length > q.limit;
@@ -63,7 +70,7 @@ export default function commentsRoutes(
         matchedRules: parseRules(r.matchedRules),
       }));
       const last = items.at(-1) as Record<string, unknown> | undefined;
-      const nextCursor = hasMore && last ? (last.notifiedAt as string) : null;
+      const nextCursor = hasMore && last ? `${String(last.notifiedAt)}|${String(last.id)}` : null;
       return { items, nextCursor };
     }),
   );
@@ -90,6 +97,16 @@ export default function commentsRoutes(
     }),
   );
   done();
+}
+
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
+
+function splitCursor(cursor: string): [string, string] {
+  const idx = cursor.lastIndexOf('|');
+  if (idx === -1) return [cursor, ''];
+  return [cursor.slice(0, idx), cursor.slice(idx + 1)];
 }
 
 function parseRules(raw: unknown): string[] {

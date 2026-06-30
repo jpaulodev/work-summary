@@ -23,7 +23,7 @@ function duration(run: RunRow): string {
 export default function Runs(): JSX.Element {
   const runs = useRuns();
   const trigger = useTriggerScan();
-  const status = useScanStatus(trigger.isSuccess || trigger.isPending);
+  const status = useScanStatus();
   const running = status.data?.running ?? trigger.isPending;
 
   return (

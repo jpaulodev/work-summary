@@ -115,7 +115,10 @@ export default function Notifications(): JSX.Element {
               id="port"
               type="number"
               value={form.port}
-              onChange={(e) => set('port', Number(e.target.value))}
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                set('port', Number.isNaN(n) ? 0 : n);
+              }}
             />
           </div>
           <div className="flex items-end pb-2">

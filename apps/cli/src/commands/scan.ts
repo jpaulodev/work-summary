@@ -38,7 +38,7 @@ export interface RunScanArgs {
 
 export async function runScan(
   args: RunScanArgs,
-): Promise<{ exitCode: number; newComments: number }> {
+): Promise<{ exitCode: number; newComments: number; runId: number }> {
   const { config, deps, dryRun, now } = args;
   const runId = deps.runsRepo.startRun();
   const log = deps.logger.child({ runId });
@@ -69,7 +69,7 @@ export async function runScan(
       errorMessage: err instanceof Error ? err.message : String(err),
     });
     log.error({ err }, 'Source fetch failed');
-    return { exitCode: EXIT.UNEXPECTED, newComments: 0 };
+    return { exitCode: EXIT.UNEXPECTED, newComments: 0, runId };
   }
 
   const newComments = deps.commentsRepo.filterUnnotified(fetched);
@@ -82,7 +82,7 @@ export async function runScan(
     for (const repo of config.sources.github.repos)
       deps.watermarksRepo.set('github', repo, now().toISOString());
     log.info({ found: fetched.length }, 'No new comments');
-    return { exitCode: EXIT.OK, newComments: 0 };
+    return { exitCode: EXIT.OK, newComments: 0, runId };
   }
 
   const notif = config.notifications.find((n) => n.enabled);
@@ -92,7 +92,7 @@ export async function runScan(
       commentsNotified: 0,
       errorMessage: 'No enabled notifier',
     });
-    return { exitCode: EXIT.CONFIG, newComments: newComments.length };
+    return { exitCode: EXIT.CONFIG, newComments: newComments.length, runId };
   }
 
   const payload: NotificationPayload = {
@@ -107,7 +107,7 @@ export async function runScan(
       commentsNotified: 0,
     });
     log.info({ would: newComments.length }, 'Dry-run');
-    return { exitCode: EXIT.DRY_RUN_WOULD_SEND, newComments: newComments.length };
+    return { exitCode: EXIT.DRY_RUN_WOULD_SEND, newComments: newComments.length, runId };
   }
 
   try {
@@ -122,6 +122,7 @@ export async function runScan(
     return {
       exitCode: isSmtpError(err) ? EXIT.SMTP : EXIT.UNEXPECTED,
       newComments: newComments.length,
+      runId,
     };
   }
 
@@ -136,7 +137,7 @@ export async function runScan(
       errorMessage: 'Storage failure after send',
     });
     log.error({ err }, 'Storage write failed after send');
-    return { exitCode: EXIT.STORAGE, newComments: newComments.length };
+    return { exitCode: EXIT.STORAGE, newComments: newComments.length, runId };
   }
 
   deps.runsRepo.finishRun(runId, 'success', {
@@ -144,5 +145,5 @@ export async function runScan(
     commentsNotified: newComments.length,
   });
   log.info({ sent: newComments.length }, 'Digest sent');
-  return { exitCode: EXIT.OK, newComments: newComments.length };
+  return { exitCode: EXIT.OK, newComments: newComments.length, runId };
 }

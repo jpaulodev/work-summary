@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Inbox, Loader2, Search } from 'lucide-react';
 import { useComments, useUpdateStatus } from '../lib/comments';
 import { StatusFilter, type StatusFilterValue } from '../components/status-filter';
@@ -9,11 +9,14 @@ import type { CommentRow } from '../lib/types';
 
 export default function Dashboard(): JSX.Element {
   const [status, setStatus] = useState<StatusFilterValue>('pending');
+  const [repoInput, setRepoInput] = useState('');
   const [repo, setRepo] = useState('');
-  const filters = useMemo(
-    () => ({ status, ...(repo.trim() ? { repo: repo.trim() } : {}) }),
-    [status, repo],
-  );
+  // Debounce the repo filter so typing does not fire a request per keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setRepo(repoInput.trim()), 300);
+    return () => clearTimeout(t);
+  }, [repoInput]);
+  const filters = useMemo(() => ({ status, ...(repo ? { repo } : {}) }), [status, repo]);
   const query = useComments(filters);
   const updateStatus = useUpdateStatus();
 
@@ -34,8 +37,8 @@ export default function Dashboard(): JSX.Element {
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder="Filter by repo (org/name)"
-            value={repo}
-            onChange={(e) => setRepo(e.target.value)}
+            value={repoInput}
+            onChange={(e) => setRepoInput(e.target.value)}
             className="w-64 pl-9"
           />
         </div>

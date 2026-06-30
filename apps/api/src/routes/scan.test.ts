@@ -23,6 +23,6 @@ describe('scan routes', () => {
   it('400 when github is not configured', async () => {
     const res = await app.inject({ method: 'POST', url: '/api/scan', headers: { cookie } });
     expect(res.statusCode).toBe(400);
-    expect(res.json<{ error: string }>().error).toContain('github not configured');
+    expect(res.json<{ error: string }>().error).toMatch(/source config/i);
   });
 });

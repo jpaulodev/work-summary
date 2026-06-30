@@ -67,11 +67,13 @@ export function useRuns() {
   });
 }
 
-export function useScanStatus(enabled: boolean) {
+export function useScanStatus() {
   return useQuery({
     queryKey: ['scan-status'],
     queryFn: () => api.get<ScanStatus>('/scan/status'),
-    refetchInterval: enabled ? 2000 : false,
+    // Keep polling while a scan is running (whoever started it - this tab, another
+    // tab, or the CLI), then stop automatically once it finishes.
+    refetchInterval: (query) => (query.state.data?.running ? 2000 : false),
   });
 }
 
