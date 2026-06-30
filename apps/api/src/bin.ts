@@ -3,8 +3,12 @@ import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { openDatabase, runMigrations } from '@work-summary/storage';
+import { loadEnvFile } from './load-env.js';
 import { buildServer } from './server.js';
 import { bootstrapMasterSecret, hasMasterSecret, loadMasterKey } from './master-key.js';
+
+// Load a .env file from the working directory before reading any config.
+loadEnvFile();
 
 function dbPath(): string {
   const stateDir =

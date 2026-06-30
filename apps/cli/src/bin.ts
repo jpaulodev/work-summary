@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
+import { loadEnvFile } from './load-env.js';
 import { runInit } from './commands/init.js';
 import { runDoctor } from './commands/doctor.js';
 import { runScan } from './commands/scan.js';
@@ -20,6 +21,9 @@ import {
   createWatermarksRepo,
 } from '@work-summary/storage';
 import { EXIT } from './exit-codes.js';
+
+// Load a .env file from the working directory before any command reads config.
+loadEnvFile();
 
 const program = new Command();
 program
