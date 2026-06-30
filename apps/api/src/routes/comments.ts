@@ -58,6 +58,7 @@ export default function commentsRoutes(
       const sql = `SELECT nc.id, nc.source, nc.repo, nc.container_type AS containerType,
         nc.container_number AS containerNumber, nc.comment_native_id AS commentId,
         nc.author_login AS author, nc.matched_rules AS matchedRules, nc.notified_at AS notifiedAt,
+        nc.issue_key AS issueKey,
         COALESCE(cs.status,'pending') AS status, cs.note, cs.snoozed_until AS snoozedUntil
       FROM notified_comments nc LEFT JOIN comment_status cs ON cs.comment_id = nc.id
       ${wheres.length ? 'WHERE ' + wheres.join(' AND ') : ''}

@@ -1,4 +1,12 @@
-import { Check, CircleDot, Clock, ExternalLink, GitPullRequest, RotateCcw } from 'lucide-react';
+import {
+  Check,
+  CircleDot,
+  Clock,
+  ExternalLink,
+  GitPullRequest,
+  RotateCcw,
+  SquareKanban,
+} from 'lucide-react';
 import type { CommentRow, CommentStatus } from '../lib/types';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
@@ -19,6 +27,12 @@ const STATUS_TONE: Record<CommentStatus, 'neutral' | 'primary' | 'success' | 'wa
   snoozed: 'warning',
 };
 
+/** JIRA `repo` is stored as "<baseUrl> :: <PROJECT>"; build a browse link. */
+function jiraBrowseUrl(repo: string, issueKey: string | null): string {
+  const base = repo.split(' :: ')[0] ?? '';
+  return issueKey ? `${base}/browse/${issueKey}` : base;
+}
+
 export function CommentCard({
   comment,
   onStatusChange,
@@ -26,16 +40,24 @@ export function CommentCard({
   comment: CommentRow;
   onStatusChange: (status: CommentStatus) => void;
 }): JSX.Element {
-  const containerUrl = `https://github.com/${comment.repo}/${
-    comment.containerType === 'pr' ? 'pull' : 'issues'
-  }/${comment.containerNumber}`;
+  const isJira = comment.source === 'jira';
+  const containerUrl = isJira
+    ? jiraBrowseUrl(comment.repo, comment.issueKey)
+    : `https://github.com/${comment.repo}/${
+        comment.containerType === 'pr' ? 'pull' : 'issues'
+      }/${comment.containerNumber}`;
+  const containerLabel = isJira ? (comment.issueKey ?? 'issue') : `#${comment.containerNumber}`;
 
   return (
     <div className="group animate-fade-in rounded-lg border border-border bg-card p-4 shadow-soft transition-all hover:border-primary/40 hover:shadow-card">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <GitPullRequest className="h-3.5 w-3.5 text-primary" />
+            {isJira ? (
+              <SquareKanban className="h-3.5 w-3.5 text-primary" />
+            ) : (
+              <GitPullRequest className="h-3.5 w-3.5 text-primary" />
+            )}
             <span className="font-medium text-foreground">{comment.repo}</span>
             <span aria-hidden>·</span>
             <a
@@ -44,7 +66,7 @@ export function CommentCard({
               rel="noreferrer"
               className="inline-flex items-center gap-0.5 hover:text-primary"
             >
-              #{comment.containerNumber}
+              {containerLabel}
               <ExternalLink className="h-3 w-3" />
             </a>
           </div>

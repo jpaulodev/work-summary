@@ -23,6 +23,7 @@
     "@work-summary/config-db": "workspace:*",
     "@work-summary/core": "workspace:*",
     "@work-summary/github-source": "workspace:*",
+    "@work-summary/jira-source": "workspace:*",
     "@work-summary/notifiers": "workspace:*",
     "@work-summary/scheduler": "workspace:*",
     "@work-summary/storage": "workspace:*",

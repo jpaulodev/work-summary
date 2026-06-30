@@ -59,6 +59,9 @@ importers:
       '@work-summary/github-source':
         specifier: workspace:*
         version: link:../../packages/github-source
+      '@work-summary/jira-source':
+        specifier: workspace:*
+        version: link:../../packages/jira-source
       '@work-summary/notifiers':
         specifier: workspace:*
         version: link:../../packages/notifiers
@@ -272,6 +275,22 @@ importers:
       msw:
         specifier: ^2.4.9
         version: 2.14.6(@types/node@20.19.43)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.5.4
+        version: 5.9.3
+      vitest:
+        specifier: ^2.0.5
+        version: 2.1.9(@types/node@20.19.43)(jsdom@25.0.1)(msw@2.14.6(@types/node@20.19.43)(typescript@5.9.3))
+
+  packages/jira-source:
+    dependencies:
+      '@work-summary/core':
+        specifier: workspace:*
+        version: link:../core
+      '@work-summary/storage':
+        specifier: workspace:*
+        version: link:../storage
+    devDependencies:
       typescript:
         specifier: ^5.5.4
         version: 5.9.3
