@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Inbox, Loader2 } from 'lucide-react';
 import { useRegister } from '../lib/auth';
 import { ApiError } from '../lib/api';
@@ -10,15 +10,10 @@ import { Button } from '../components/ui/button';
 import { Input, Label } from '../components/ui/input';
 
 const schema = z.object({
-  token: z.string().min(1, 'Invite token is required'),
   username: z.string().min(1, 'Username is required'),
   password: z.string().min(8, 'Password must be at least 8 characters'),
 });
 type FormValues = z.infer<typeof schema>;
-
-function inviteFromUrl(): string {
-  return new URLSearchParams(window.location.search).get('invite') ?? '';
-}
 
 export default function Register(): JSX.Element {
   const registerMut = useRegister();
@@ -28,10 +23,7 @@ export default function Register(): JSX.Element {
     register,
     handleSubmit,
     formState: { errors },
-  } = useForm<FormValues>({
-    resolver: zodResolver(schema),
-    defaultValues: { token: inviteFromUrl() },
-  });
+  } = useForm<FormValues>({ resolver: zodResolver(schema) });
 
   const onSubmit = handleSubmit((values) => {
     setServerError(null);
@@ -42,9 +34,9 @@ export default function Register(): JSX.Element {
         setServerError(
           code === 'username-taken'
             ? 'That username is taken'
-            : code === 'expired-invite'
-              ? 'This invite has expired'
-              : 'Invalid or already-used invite',
+            : code === 'registration-disabled'
+              ? 'Signups are disabled on this server'
+              : 'Could not create your account',
         );
       },
     });
@@ -58,18 +50,15 @@ export default function Register(): JSX.Element {
             <Inbox className="h-6 w-6" />
           </div>
           <h1 className="text-xl font-semibold tracking-tight">Create your account</h1>
-          <p className="mt-1 text-sm text-muted-foreground">You were invited to work-summary</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Your own dashboard — connect your GitHub & JIRA
+          </p>
         </div>
 
         <form
           onSubmit={(e) => void onSubmit(e)}
           className="rounded-lg border border-border bg-card p-6 shadow-card"
         >
-          <div className="mb-4">
-            <Label htmlFor="token">Invite token</Label>
-            <Input id="token" {...register('token')} />
-            {errors.token && <p className="mt-1 text-xs text-danger">{errors.token.message}</p>}
-          </div>
           <div className="mb-4">
             <Label htmlFor="username">Username</Label>
             <Input id="username" autoComplete="username" {...register('username')} />
@@ -95,6 +84,13 @@ export default function Register(): JSX.Element {
             Create account
           </Button>
         </form>
+
+        <p className="mt-4 text-center text-sm text-muted-foreground">
+          Already have an account?{' '}
+          <Link to="/login" className="font-medium text-primary hover:underline">
+            Sign in
+          </Link>
+        </p>
       </div>
     </div>
   );

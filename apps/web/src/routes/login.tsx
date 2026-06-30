@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Inbox, Loader2 } from 'lucide-react';
 import { useLogin } from '../lib/auth';
 import { ApiError } from '../lib/api';
@@ -77,6 +77,13 @@ export default function Login(): JSX.Element {
             Sign in
           </Button>
         </form>
+
+        <p className="mt-4 text-center text-sm text-muted-foreground">
+          New here?{' '}
+          <Link to="/register" className="font-medium text-primary hover:underline">
+            Create an account
+          </Link>
+        </p>
       </div>
     </div>
   );

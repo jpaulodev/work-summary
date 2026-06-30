@@ -17,7 +17,6 @@ import schedulesRoutes from './routes/schedules.js';
 import jiraRoutes from './routes/jira.js';
 import repliesRoutes from './routes/replies.js';
 import oauthRoutes from './routes/oauth.js';
-import invitesRoutes from './routes/invites.js';
 import { triggerScan } from './scan-runner.js';
 import { ScheduleRepository, type SqliteDatabase } from '@work-summary/storage';
 import { ScheduleEngine } from '@work-summary/scheduler';
@@ -88,7 +87,6 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(jiraRoutes, { prefix: '/api' });
   await app.register(repliesRoutes, { prefix: '/api' });
   await app.register(oauthRoutes, { prefix: '/api' });
-  await app.register(invitesRoutes, { prefix: '/api' });
 
   if (process.env.NODE_ENV === 'production') {
     const webDist = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'web', 'dist');
