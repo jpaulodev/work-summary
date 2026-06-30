@@ -25,7 +25,7 @@ const base = {
 
 describe('notifierConfigRepo', () => {
   it('list returns items without secrets but with hasSecret', () => {
-    const repo = createNotifierConfigRepo(db, key);
+    const repo = createNotifierConfigRepo(db, key, 1);
     repo.put('primary', base);
     const list = repo.list();
     expect(list).toHaveLength(1);
@@ -35,7 +35,7 @@ describe('notifierConfigRepo', () => {
   });
 
   it('get decrypts the secret round-trip', () => {
-    const repo = createNotifierConfigRepo(db, key);
+    const repo = createNotifierConfigRepo(db, key, 1);
     repo.put('primary', base);
     const got = repo.get('primary');
     expect(got?.user).toBe('u');
@@ -43,7 +43,7 @@ describe('notifierConfigRepo', () => {
   });
 
   it('preserves the secret on partial update without user/pass', () => {
-    const repo = createNotifierConfigRepo(db, key);
+    const repo = createNotifierConfigRepo(db, key, 1);
     repo.put('primary', base);
     repo.put('primary', { host: 'smtp.new' });
     const got = repo.get('primary');
@@ -52,7 +52,7 @@ describe('notifierConfigRepo', () => {
   });
 
   it('does not store smtp pass as plaintext', () => {
-    const repo = createNotifierConfigRepo(db, key);
+    const repo = createNotifierConfigRepo(db, key, 1);
     repo.put('primary', { ...base, pass: 'super-secret-pass' });
     const raw = db
       .prepare('SELECT secret_ciphertext, config_json FROM notifier_config WHERE id = ?')
@@ -62,7 +62,7 @@ describe('notifierConfigRepo', () => {
   });
 
   it('delete removes the row', () => {
-    const repo = createNotifierConfigRepo(db, key);
+    const repo = createNotifierConfigRepo(db, key, 1);
     repo.put('primary', base);
     repo.delete('primary');
     expect(repo.list()).toHaveLength(0);

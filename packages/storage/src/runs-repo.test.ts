@@ -11,13 +11,13 @@ beforeEach(() => {
 
 describe('runsRepo', () => {
   it('startRun returns incrementing ids', () => {
-    const repo = createRunsRepo(db, () => new Date('2026-06-01T00:00:00Z'));
+    const repo = createRunsRepo(db, 1, () => new Date('2026-06-01T00:00:00Z'));
     expect(repo.startRun()).toBe(1);
     expect(repo.startRun()).toBe(2);
   });
 
   it('finishRun updates status and stats', () => {
-    const repo = createRunsRepo(db, () => new Date('2026-06-01T00:00:00Z'));
+    const repo = createRunsRepo(db, 1, () => new Date('2026-06-01T00:00:00Z'));
     const id = repo.startRun();
     repo.finishRun(id, 'success', {
       commentsFound: 7,
@@ -33,7 +33,7 @@ describe('runsRepo', () => {
   });
 
   it('finishRun records error message on failed', () => {
-    const repo = createRunsRepo(db, () => new Date('2026-06-01T00:00:00Z'));
+    const repo = createRunsRepo(db, 1, () => new Date('2026-06-01T00:00:00Z'));
     const id = repo.startRun();
     repo.finishRun(id, 'failed', { commentsFound: 0, commentsNotified: 0, errorMessage: 'boom' });
     const row = db.prepare('SELECT error_message FROM runs WHERE id = ?').get(id) as {

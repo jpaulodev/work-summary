@@ -5,9 +5,9 @@ import { triggerScan, scanStatus } from '../scan-runner.js';
 export default function scanRoutes(app: FastifyInstance, _opts: unknown, done: () => void): void {
   app.post(
     '/scan',
-    authed(async (_req, reply) => {
+    authed(async (req, reply) => {
       try {
-        const { runId } = await triggerScan(app);
+        const { runId } = await triggerScan(app, { userId: req.userId as number });
         return { runId };
       } catch (err) {
         if (err instanceof Error && err.message === 'already-running') {
@@ -20,7 +20,7 @@ export default function scanRoutes(app: FastifyInstance, _opts: unknown, done: (
 
   app.get(
     '/scan/status',
-    authed(() => scanStatus()),
+    authed((req) => scanStatus(req.userId as number)),
   );
   done();
 }

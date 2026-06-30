@@ -106,9 +106,9 @@ program
         config: cfg,
         deps: {
           db,
-          commentsRepo: createCommentsRepo(db),
-          runsRepo: createRunsRepo(db, () => new Date()),
-          watermarksRepo: createWatermarksRepo(db),
+          commentsRepo: createCommentsRepo(db, 1),
+          runsRepo: createRunsRepo(db, 1, () => new Date()),
+          watermarksRepo: createWatermarksRepo(db, 1),
           source,
           notifier,
           logger,

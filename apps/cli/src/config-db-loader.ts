@@ -45,13 +45,13 @@ export function hasDbConfig(db: SqliteDatabase): boolean {
 }
 
 export function loadConfigFromDb(db: SqliteDatabase, key: Buffer, githubLogin: string): Config {
-  const src = createSourceConfigRepo(db).getGithub();
+  const src = createSourceConfigRepo(db, 1).getGithub();
   if (!src) throw new ConfigError('No source config in DB');
   const tokens = createOAuthConnectionService(db, key).getTokens(1, 'github');
   if (!tokens)
     throw new ConfigError('GitHub is not connected (run import-yaml or connect via the dashboard)');
   const login = githubLogin || tokens.accountLogin || '';
-  const notifs = createNotifierConfigRepo(db, key);
+  const notifs = createNotifierConfigRepo(db, key, 1);
   // The CLI only sends email; webhook notifiers (slack/teams) are delivered by
   // the API scan process, so they are filtered out of the CLI config here.
   const notifications = notifs

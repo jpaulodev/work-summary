@@ -32,7 +32,10 @@ interface RawSite {
 const SELECT_COLS = 'id, base_url, cloud_id, developer_field_id, enabled, created_at, updated_at';
 
 export class JiraSiteRepository {
-  constructor(private readonly db: SqliteDatabase) {}
+  constructor(
+    private readonly db: SqliteDatabase,
+    private readonly userId: number,
+  ) {}
 
   private parse(r: RawSite): JiraSiteRow {
     return {
@@ -48,13 +51,16 @@ export class JiraSiteRepository {
 
   list(): JiraSiteRow[] {
     return (
-      this.db.prepare(`SELECT ${SELECT_COLS} FROM jira_site ORDER BY base_url`).all() as RawSite[]
+      this.db
+        .prepare(`SELECT ${SELECT_COLS} FROM jira_site WHERE user_id = ? ORDER BY base_url`)
+        .all(this.userId) as RawSite[]
     ).map((r) => this.parse(r));
   }
 
   get(id: string): JiraSiteRow | null {
-    const r = this.db.prepare(`SELECT ${SELECT_COLS} FROM jira_site WHERE id = ?`).get(id) as
-      RawSite | undefined;
+    const r = this.db
+      .prepare(`SELECT ${SELECT_COLS} FROM jira_site WHERE id = ? AND user_id = ?`)
+      .get(id, this.userId) as RawSite | undefined;
     return r ? this.parse(r) : null;
   }
 
@@ -65,10 +71,19 @@ export class JiraSiteRepository {
     this.db
       .prepare(
         `INSERT INTO jira_site
-          (id, base_url, cloud_id, email, encrypted_token, token_nonce, developer_field_id, enabled, created_at, updated_at)
-         VALUES (?, ?, ?, '', '', '', ?, ?, ?, ?)`,
+          (id, user_id, base_url, cloud_id, email, encrypted_token, token_nonce, developer_field_id, enabled, created_at, updated_at)
+         VALUES (?, ?, ?, ?, '', '', '', ?, ?, ?, ?)`,
       )
-      .run(row.id, row.baseUrl, row.cloudId, row.developerFieldId, row.enabled ? 1 : 0, now, now);
+      .run(
+        row.id,
+        this.userId,
+        row.baseUrl,
+        row.cloudId,
+        row.developerFieldId,
+        row.enabled ? 1 : 0,
+        now,
+        now,
+      );
     return this.get(row.id) as JiraSiteRow;
   }
 
@@ -80,7 +95,7 @@ export class JiraSiteRepository {
       .prepare(
         `UPDATE jira_site SET
           base_url = ?, cloud_id = ?, developer_field_id = ?, enabled = ?, updated_at = ?
-         WHERE id = ?`,
+         WHERE id = ? AND user_id = ?`,
       )
       .run(
         next.baseUrl,
@@ -89,12 +104,13 @@ export class JiraSiteRepository {
         next.enabled ? 1 : 0,
         next.updatedAt,
         id,
+        this.userId,
       );
     return this.get(id) as JiraSiteRow;
   }
 
   delete(id: string): void {
-    this.db.prepare('DELETE FROM jira_site WHERE id = ?').run(id);
+    this.db.prepare('DELETE FROM jira_site WHERE id = ? AND user_id = ?').run(id, this.userId);
   }
 }
 

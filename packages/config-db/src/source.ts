@@ -41,17 +41,19 @@ const DEFAULT_RULES: MatchRulesConfig = {
 
 const DEFAULT_FILTERS: BotFilterConfig = { excludeBots: true, botWhitelist: [] };
 
-export function createSourceConfigRepo(db: SqliteDatabase): SourceConfigRepo {
-  const get = db.prepare('SELECT enabled, config_json FROM source_config WHERE source = ?');
+export function createSourceConfigRepo(db: SqliteDatabase, userId: number): SourceConfigRepo {
+  const get = db.prepare(
+    'SELECT enabled, config_json FROM source_config WHERE user_id = ? AND source = ?',
+  );
   const upsert = db.prepare(
-    `INSERT INTO source_config (source, enabled, token_ciphertext, token_nonce, config_json)
-     VALUES (?, ?, NULL, NULL, ?)
-     ON CONFLICT(source) DO UPDATE SET enabled = excluded.enabled, config_json = excluded.config_json`,
+    `INSERT INTO source_config (user_id, source, enabled, token_ciphertext, token_nonce, config_json)
+     VALUES (?, ?, ?, NULL, NULL, ?)
+     ON CONFLICT(user_id, source) DO UPDATE SET enabled = excluded.enabled, config_json = excluded.config_json`,
   );
 
   const repo: SourceConfigRepo = {
     getGithub() {
-      const row = get.get('github') as { enabled: number; config_json: string } | undefined;
+      const row = get.get(userId, 'github') as { enabled: number; config_json: string } | undefined;
       if (!row) return null;
       const cj = JSON.parse(row.config_json) as ConfigJson;
       return {
@@ -69,7 +71,7 @@ export function createSourceConfigRepo(db: SqliteDatabase): SourceConfigRepo {
         filters: input.filters ?? existing?.filters ?? DEFAULT_FILTERS,
       };
       const enabled = (input.enabled ?? existing?.enabled ?? true) ? 1 : 0;
-      upsert.run('github', enabled, JSON.stringify(merged));
+      upsert.run(userId, 'github', enabled, JSON.stringify(merged));
     },
   };
   return repo;

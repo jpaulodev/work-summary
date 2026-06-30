@@ -5,7 +5,9 @@ import { ScheduleEngine } from './engine.js';
 function makeRepo() {
   const db = openDatabase(':memory:');
   runMigrations(db);
-  return new ScheduleRepository(db);
+  // User-scoped repo (admin=1); the engine reads/fires it the same way it would
+  // the cross-user repo in production, with a single user's schedules here.
+  return new ScheduleRepository(db, 1);
 }
 
 describe('ScheduleEngine', () => {

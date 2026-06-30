@@ -25,12 +25,13 @@ import { buildNotifier, buildCompositeNotifier } from './notifier-factory.js';
  */
 function buildCompositeSource(
   app: FastifyInstance,
+  userId: number,
   githubSource: GithubSource | null,
   jiraAccess: JiraAccess | null,
   since: Date,
   lookbackDays: number,
 ): Source {
-  const siteRepo = new JiraSiteRepository(app.db);
+  const siteRepo = new JiraSiteRepository(app.db, userId);
   const projectRepo = new JiraProjectRepository(app.db);
   const sites = siteRepo.list();
   return {
@@ -61,29 +62,33 @@ function buildCompositeSource(
   };
 }
 
-let running = false;
-let lastRunId: number | undefined;
+// Per-user single-flight: one in-flight scan per user, last run id per user.
+const runningUsers = new Set<number>();
+const lastRunIdByUser = new Map<number, number>();
 
-export function scanStatus(): { running: boolean; runId?: number } {
-  return lastRunId === undefined ? { running } : { running, runId: lastRunId };
+export function scanStatus(userId: number): { running: boolean; runId?: number } {
+  const runId = lastRunIdByUser.get(userId);
+  return runId === undefined
+    ? { running: runningUsers.has(userId) }
+    : { running: runningUsers.has(userId), runId };
 }
 
 export interface TriggerScanOptions {
+  userId: number;
   triggeredBy?: string;
   reposFilter?: string[] | null;
 }
 
 export async function triggerScan(
   app: FastifyInstance,
-  opts: TriggerScanOptions = {},
+  opts: TriggerScanOptions,
 ): Promise<{ runId: number }> {
-  if (running) throw new Error('already-running');
-  running = true;
+  const userId = opts.userId;
+  if (runningUsers.has(userId)) throw new Error('already-running');
+  runningUsers.add(userId);
   try {
     const logger = pino({ level: 'info' });
-    // Single-user today; Phase 7c scopes this to the requesting/owning user.
-    const userId = 1;
-    const ghCfg = createSourceConfigRepo(app.db).getGithub();
+    const ghCfg = createSourceConfigRepo(app.db, userId).getGithub();
     const ghTokens = createOAuthConnectionService(app.db, app.masterKey).getTokens(
       userId,
       'github',
@@ -94,7 +99,7 @@ export async function triggerScan(
     }
 
     // Build a notifier per enabled config (smtp/slack/teams) and fan out to all.
-    const notifRepo = createNotifierConfigRepo(app.db, app.masterKey);
+    const notifRepo = createNotifierConfigRepo(app.db, app.masterKey, userId);
     const fulls = notifRepo
       .list()
       .filter((n) => n.enabled)
@@ -156,11 +161,12 @@ export async function triggerScan(
       config,
       deps: {
         db: app.db,
-        commentsRepo: createCommentsRepo(app.db),
-        runsRepo: createRunsRepo(app.db, () => new Date()),
-        watermarksRepo: createWatermarksRepo(app.db),
+        commentsRepo: createCommentsRepo(app.db, userId),
+        runsRepo: createRunsRepo(app.db, userId, () => new Date()),
+        watermarksRepo: createWatermarksRepo(app.db, userId),
         source: buildCompositeSource(
           app,
+          userId,
           githubSource,
           jiraAccess,
           since,
@@ -174,9 +180,9 @@ export async function triggerScan(
       triggeredBy: opts.triggeredBy ?? 'manual',
     });
 
-    lastRunId = result.runId;
+    lastRunIdByUser.set(userId, result.runId);
     return { runId: result.runId };
   } finally {
-    running = false;
+    runningUsers.delete(userId);
   }
 }

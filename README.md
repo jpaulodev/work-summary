@@ -15,6 +15,9 @@ you can triage and reply without leaving the page.
   Every enabled channel receives the digest; one failing channel never blocks the others.
 - **Two ways to run** — a zero-server **CLI** (great for cron), or the **web dashboard +
   REST API** with login, an in-process scheduler, and one-click triage.
+- **Multi-user** — invite teammates from the dashboard; each person connects their own
+  GitHub/JIRA and sees only their own comments, schedules, and runs. The first user is the
+  admin.
 - **Reply from the dashboard** — answer a GitHub or JIRA comment inline; the reply is
   posted upstream and the comment is marked addressed.
 - **Secure by default** — all secrets (GitHub/JIRA tokens, SMTP creds, webhook URLs) are
@@ -136,6 +139,7 @@ Open **http://127.0.0.1:3001**, log in, then configure everything from the sideb
 | **JIRA** (Sources area) | **Connect JIRA** with OAuth (Atlassian 3LO), then discover and pick projects. Scans then include JIRA issue comments.                                                                                                           |
 | **Notifications**       | Add one or more channels: **Email (SMTP)**, **Slack** (incoming webhook), or **Microsoft Teams** (incoming webhook). Each has a **Send test** button. Every enabled channel receives the digest.                                |
 | **Schedules**           | Create cron schedules (with timezone, optional repo filter) so scans run automatically — this replaces external cron.                                                                                                           |
+| **Team** (admin only)   | Invite teammates: create an invite, share the link, and they register their own account at `/register?invite=…`. Each member's sources, comments, schedules, and runs are isolated.                                             |
 | **Dashboard**           | Triage matched comments: filter by status (pending / addressed / resolved / snoozed), mark/snooze/reopen, **Reply** inline (posts to GitHub/JIRA and marks the comment addressed), and **Run now** to trigger a scan on demand. |
 
 > The GitHub/JIRA token used for replies must have **write** scope on the repo/issue. A

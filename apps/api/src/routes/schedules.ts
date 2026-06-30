@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { isValidCron, nextOccurrences } from '@work-summary/scheduler';
+import { ScheduleRepository } from '@work-summary/storage';
 import { authed } from '../plugins/auth-guard.js';
 
 const CreateSchema = z.object({
@@ -30,16 +31,19 @@ export default function schedulesRoutes(
   _opts: unknown,
   done: () => void,
 ): void {
+  const repoFor = (req: { userId?: number }): ScheduleRepository =>
+    new ScheduleRepository(app.db, req.userId ?? null);
+
   app.get(
     '/schedules',
-    authed(() => app.scheduleRepo.list()),
+    authed((req) => repoFor(req).list()),
   );
 
   app.post(
     '/schedules',
     authed((req, reply) => {
       const body = CreateSchema.parse(req.body);
-      const row = app.scheduleRepo.insert({ id: randomUUID(), ...body });
+      const row = repoFor(req).insert({ id: randomUUID(), ...body });
       app.scheduleEngine.upsert(row.id);
       return reply.code(201).send(row);
     }),
@@ -49,9 +53,10 @@ export default function schedulesRoutes(
     '/schedules/:id',
     authed((req, reply) => {
       const { id } = z.object({ id: z.string() }).parse(req.params);
-      if (!app.scheduleRepo.get(id)) return reply.code(404).send({ error: 'not found' });
+      const repo = repoFor(req);
+      if (!repo.get(id)) return reply.code(404).send({ error: 'not found' });
       const patch = UpdateSchema.parse(req.body);
-      const row = app.scheduleRepo.update(id, patch);
+      const row = repo.update(id, patch);
       app.scheduleEngine.upsert(id);
       return row;
     }),
@@ -61,7 +66,10 @@ export default function schedulesRoutes(
     '/schedules/:id',
     authed((req, reply) => {
       const { id } = z.object({ id: z.string() }).parse(req.params);
-      app.scheduleRepo.delete(id);
+      // Guard cross-user deletes: only remove if this user owns the schedule.
+      const repo = repoFor(req);
+      if (!repo.get(id)) return reply.code(404).send({ error: 'not found' });
+      repo.delete(id);
       app.scheduleEngine.remove(id);
       return reply.code(204).send();
     }),
@@ -71,7 +79,7 @@ export default function schedulesRoutes(
     '/schedules/:id/preview',
     authed((req, reply) => {
       const { id } = z.object({ id: z.string() }).parse(req.params);
-      const row = app.scheduleRepo.get(id);
+      const row = repoFor(req).get(id);
       if (!row) return reply.code(404).send({ error: 'not found' });
       return { next: nextOccurrences(row.cronExpression, row.timezone, 5, new Date()) };
     }),

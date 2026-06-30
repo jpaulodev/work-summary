@@ -18,7 +18,7 @@ describe('notifiers routes', () => {
   });
 
   it('lists notifiers without leaking secrets', async () => {
-    createNotifierConfigRepo(db, TEST_KEY).put('primary', {
+    createNotifierConfigRepo(db, TEST_KEY, 1).put('primary', {
       enabled: true,
       host: 'smtp.test',
       port: 587,
@@ -52,7 +52,7 @@ describe('notifiers routes', () => {
       },
     });
     expect(res.statusCode).toBe(200);
-    const got = createNotifierConfigRepo(db, TEST_KEY).get('primary');
+    const got = createNotifierConfigRepo(db, TEST_KEY, 1).get('primary');
     expect(got?.host).toBe('smtp.example');
     expect(got?.pass).toBe('p');
   });

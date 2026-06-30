@@ -1,0 +1,128 @@
+-- Phase 7c: multi-user. Every per-user table gains a user_id; existing rows
+-- belong to the bootstrap admin (user 1). app_user gains roles + invites.
+
+-- --- app_user: drop the single-user CHECK(id=1), add role + email -------------
+CREATE TABLE app_user_new (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  username      TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  role          TEXT NOT NULL DEFAULT 'member',
+  email         TEXT,
+  created_at    TEXT NOT NULL
+);
+INSERT INTO app_user_new (id, username, password_hash, role, created_at)
+  SELECT id, username, password_hash, 'admin', created_at FROM app_user;
+DROP TABLE app_user;
+ALTER TABLE app_user_new RENAME TO app_user;
+
+-- --- invites ------------------------------------------------------------------
+CREATE TABLE invite (
+  id          TEXT PRIMARY KEY,
+  token       TEXT NOT NULL UNIQUE,
+  email       TEXT,
+  role        TEXT NOT NULL DEFAULT 'member',
+  created_by  INTEGER NOT NULL,
+  created_at  TEXT NOT NULL,
+  expires_at  TEXT NOT NULL,
+  consumed_by INTEGER,
+  consumed_at TEXT
+);
+
+-- --- source_config: PK becomes (user_id, source) ------------------------------
+CREATE TABLE source_config_new (
+  user_id          INTEGER NOT NULL DEFAULT 1,
+  source           TEXT NOT NULL,
+  enabled          INTEGER NOT NULL DEFAULT 1,
+  token_ciphertext TEXT,
+  token_nonce      TEXT,
+  config_json      TEXT NOT NULL,
+  PRIMARY KEY (user_id, source)
+);
+INSERT INTO source_config_new (user_id, source, enabled, token_ciphertext, token_nonce, config_json)
+  SELECT 1, source, enabled, token_ciphertext, token_nonce, config_json FROM source_config;
+DROP TABLE source_config;
+ALTER TABLE source_config_new RENAME TO source_config;
+
+-- --- source_watermarks: PK becomes (user_id, source, repo) --------------------
+CREATE TABLE source_watermarks_new (
+  user_id         INTEGER NOT NULL DEFAULT 1,
+  source          TEXT NOT NULL,
+  repo            TEXT NOT NULL,
+  last_success_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, source, repo)
+);
+INSERT INTO source_watermarks_new (user_id, source, repo, last_success_at)
+  SELECT 1, source, repo, last_success_at FROM source_watermarks;
+DROP TABLE source_watermarks;
+ALTER TABLE source_watermarks_new RENAME TO source_watermarks;
+
+-- --- notified_comments + comment_reply: rebuild together to add user_id -------
+-- notified_comments PK becomes (user_id, id) so the same upstream comment can be
+-- tracked independently per user. comment_reply keeps its cascade via a composite
+-- FK. Rebuild children-first so dropping the parent triggers no cascade delete.
+CREATE TABLE notified_comments_new (
+  user_id           INTEGER NOT NULL DEFAULT 1,
+  id                TEXT NOT NULL,
+  source            TEXT NOT NULL,
+  repo              TEXT NOT NULL,
+  container_type    TEXT NOT NULL,
+  container_number  INTEGER NOT NULL,
+  comment_native_id TEXT NOT NULL,
+  author_login      TEXT NOT NULL,
+  matched_rules     TEXT NOT NULL,
+  notified_at       TEXT NOT NULL,
+  issue_key         TEXT,
+  comment_url       TEXT,
+  PRIMARY KEY (user_id, id)
+);
+INSERT INTO notified_comments_new
+  (user_id, id, source, repo, container_type, container_number, comment_native_id,
+   author_login, matched_rules, notified_at, issue_key, comment_url)
+  SELECT 1, id, source, repo, container_type, container_number, comment_native_id,
+         author_login, matched_rules, notified_at, issue_key, comment_url
+  FROM notified_comments;
+
+CREATE TABLE comment_reply_new (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id            INTEGER NOT NULL DEFAULT 1,
+  comment_id         TEXT NOT NULL,
+  body               TEXT NOT NULL,
+  sent_at            TEXT NOT NULL,
+  source             TEXT NOT NULL,
+  source_response_id TEXT,
+  source_url         TEXT,
+  FOREIGN KEY (user_id, comment_id) REFERENCES notified_comments_new(user_id, id) ON DELETE CASCADE
+);
+INSERT INTO comment_reply_new
+  (id, user_id, comment_id, body, sent_at, source, source_response_id, source_url)
+  SELECT id, 1, comment_id, body, sent_at, source, source_response_id, source_url
+  FROM comment_reply;
+
+DROP TABLE comment_reply;
+DROP TABLE notified_comments;
+ALTER TABLE notified_comments_new RENAME TO notified_comments;
+ALTER TABLE comment_reply_new RENAME TO comment_reply;
+CREATE INDEX idx_notified_repo ON notified_comments(repo);
+CREATE INDEX idx_notified_at ON notified_comments(notified_at);
+CREATE INDEX idx_comment_reply_comment ON comment_reply(user_id, comment_id);
+
+-- --- comment_status: PK becomes (user_id, comment_id) -------------------------
+CREATE TABLE comment_status_new (
+  user_id       INTEGER NOT NULL DEFAULT 1,
+  comment_id    TEXT NOT NULL,
+  status        TEXT NOT NULL,
+  snoozed_until TEXT,
+  note          TEXT,
+  updated_at    TEXT NOT NULL,
+  PRIMARY KEY (user_id, comment_id)
+);
+INSERT INTO comment_status_new (user_id, comment_id, status, snoozed_until, note, updated_at)
+  SELECT 1, comment_id, status, snoozed_until, note, updated_at FROM comment_status;
+DROP TABLE comment_status;
+ALTER TABLE comment_status_new RENAME TO comment_status;
+
+-- --- simple user_id columns (default to the admin) ----------------------------
+ALTER TABLE runs ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE notifier_config ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE schedules ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE jira_site ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1;

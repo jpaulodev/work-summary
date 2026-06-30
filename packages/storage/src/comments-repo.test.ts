@@ -30,7 +30,7 @@ beforeEach(() => {
 
 describe('commentsRepo', () => {
   it('filterUnnotified returns all when DB empty', () => {
-    const repo = createCommentsRepo(db);
+    const repo = createCommentsRepo(db, 1);
     const input = [mkComment('a'), mkComment('b')];
     expect(
       repo
@@ -41,14 +41,14 @@ describe('commentsRepo', () => {
   });
 
   it('markAsNotified persists ids, filterUnnotified skips them', () => {
-    const repo = createCommentsRepo(db);
+    const repo = createCommentsRepo(db, 1);
     repo.markAsNotified([mkComment('a')], '2026-06-01T00:00:00Z');
     const input = [mkComment('a'), mkComment('b')];
     expect(repo.filterUnnotified(input).map((c) => c.id)).toEqual(['b']);
   });
 
   it('markAsNotified is idempotent (re-marking same id does not throw)', () => {
-    const repo = createCommentsRepo(db);
+    const repo = createCommentsRepo(db, 1);
     repo.markAsNotified([mkComment('a')], '2026-06-01T00:00:00Z');
     repo.markAsNotified([mkComment('a')], '2026-06-02T00:00:00Z');
     const input = [mkComment('a')];
@@ -56,7 +56,7 @@ describe('commentsRepo', () => {
   });
 
   it('handles empty input arrays', () => {
-    const repo = createCommentsRepo(db);
+    const repo = createCommentsRepo(db, 1);
     expect(repo.filterUnnotified([])).toEqual([]);
     expect(() => repo.markAsNotified([], '2026-06-01T00:00:00Z')).not.toThrow();
   });

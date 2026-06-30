@@ -20,6 +20,7 @@ describe('migration 0003', () => {
       'repos_filter',
       'timezone',
       'updated_at',
+      'user_id',
     ]);
   });
 
@@ -32,6 +33,6 @@ describe('migration 0003', () => {
 
   it('applies versions 1, 2 and 3', () => {
     const db = openDatabase(':memory:');
-    expect(runMigrations(db).applied).toEqual([1, 2, 3, 4, 6, 7, 8]);
+    expect(runMigrations(db).applied).toEqual([1, 2, 3, 4, 6, 7, 8, 9]);
   });
 });

@@ -11,11 +11,16 @@ export default function bootstrapRoutes(
 ): void {
   app.post('/bootstrap', async (req, reply) => {
     const body = BodySchema.parse(req.body);
-    const exists = app.db.prepare('SELECT 1 FROM app_user WHERE id = 1').get();
+    // Bootstrap creates the first user, who becomes the admin. Once any user
+    // exists, further accounts are created via invites (see /auth/register).
+    const exists = app.db.prepare('SELECT 1 FROM app_user LIMIT 1').get();
     if (exists) return reply.code(409).send({ error: 'Already bootstrapped' });
     const hash = await hashPassword(body.password);
     app.db
-      .prepare('INSERT INTO app_user (id, username, password_hash, created_at) VALUES (1, ?, ?, ?)')
+      .prepare(
+        `INSERT INTO app_user (id, username, password_hash, role, created_at)
+         VALUES (1, ?, ?, 'admin', ?)`,
+      )
       .run(body.username, hash, app.now().toISOString());
     return reply.code(201).send({ ok: true });
   });

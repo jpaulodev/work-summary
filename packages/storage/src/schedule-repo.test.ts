@@ -11,7 +11,7 @@ beforeEach(() => {
 
 describe('ScheduleRepository', () => {
   it('inserts and lists', () => {
-    const repo = new ScheduleRepository(db);
+    const repo = new ScheduleRepository(db, 1);
     repo.insert({
       id: 's1',
       name: 'weekday-9am',
@@ -26,7 +26,7 @@ describe('ScheduleRepository', () => {
   });
 
   it('serializes reposFilter as JSON', () => {
-    const repo = new ScheduleRepository(db);
+    const repo = new ScheduleRepository(db, 1);
     repo.insert({
       id: 's2',
       name: 'x',
@@ -39,7 +39,7 @@ describe('ScheduleRepository', () => {
   });
 
   it('updates fields and toggles enabled', () => {
-    const repo = new ScheduleRepository(db);
+    const repo = new ScheduleRepository(db, 1);
     repo.insert({
       id: 's3',
       name: 'x',
@@ -54,7 +54,7 @@ describe('ScheduleRepository', () => {
   });
 
   it('markRun records last run and next run', () => {
-    const repo = new ScheduleRepository(db);
+    const repo = new ScheduleRepository(db, 1);
     repo.insert({
       id: 's4',
       name: 'x',
@@ -70,7 +70,7 @@ describe('ScheduleRepository', () => {
   });
 
   it('deletes', () => {
-    const repo = new ScheduleRepository(db);
+    const repo = new ScheduleRepository(db, 1);
     repo.insert({
       id: 's5',
       name: 'x',

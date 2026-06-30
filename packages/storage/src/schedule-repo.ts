@@ -2,6 +2,7 @@ import type { SqliteDatabase } from './db.js';
 
 export interface ScheduleRow {
   id: string;
+  userId: number;
   name: string;
   enabled: boolean;
   cronExpression: string;
@@ -30,6 +31,7 @@ export interface SchedulePatch {
 
 interface RawRow {
   id: string;
+  user_id: number;
   name: string;
   enabled: number;
   cron_expression: string;
@@ -42,12 +44,21 @@ interface RawRow {
   next_run_at: string | null;
 }
 
+/**
+ * Schedule storage. Pass a userId to scope every operation to one user (the
+ * route-facing case). Pass null for the scheduler engine, which must see and
+ * fire schedules across all users (each row carries its owning userId).
+ */
 export class ScheduleRepository {
-  constructor(private readonly db: SqliteDatabase) {}
+  constructor(
+    private readonly db: SqliteDatabase,
+    private readonly userId: number | null = null,
+  ) {}
 
   private parseRow(r: RawRow): ScheduleRow {
     return {
       id: r.id,
+      userId: r.user_id,
       name: r.name,
       enabled: r.enabled === 1,
       cronExpression: r.cron_expression,
@@ -62,26 +73,37 @@ export class ScheduleRepository {
   }
 
   list(): ScheduleRow[] {
-    return (this.db.prepare('SELECT * FROM schedules ORDER BY name').all() as RawRow[]).map((r) =>
-      this.parseRow(r),
-    );
+    const rows =
+      this.userId === null
+        ? (this.db.prepare('SELECT * FROM schedules ORDER BY name').all() as RawRow[])
+        : (this.db
+            .prepare('SELECT * FROM schedules WHERE user_id = ? ORDER BY name')
+            .all(this.userId) as RawRow[]);
+    return rows.map((r) => this.parseRow(r));
   }
 
   get(id: string): ScheduleRow | null {
-    const r = this.db.prepare('SELECT * FROM schedules WHERE id = ?').get(id) as RawRow | undefined;
+    const r =
+      this.userId === null
+        ? (this.db.prepare('SELECT * FROM schedules WHERE id = ?').get(id) as RawRow | undefined)
+        : (this.db
+            .prepare('SELECT * FROM schedules WHERE id = ? AND user_id = ?')
+            .get(id, this.userId) as RawRow | undefined);
     return r ? this.parseRow(r) : null;
   }
 
   insert(row: ScheduleInsert): ScheduleRow {
+    if (this.userId === null) throw new Error('insert requires a user-scoped repository');
     const now = new Date().toISOString();
     this.db
       .prepare(
         `INSERT INTO schedules
-          (id, name, enabled, cron_expression, timezone, repos_filter, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          (id, user_id, name, enabled, cron_expression, timezone, repos_filter, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         row.id,
+        this.userId,
         row.name,
         row.enabled ? 1 : 0,
         row.cronExpression,
@@ -118,7 +140,11 @@ export class ScheduleRepository {
   }
 
   delete(id: string): void {
-    this.db.prepare('DELETE FROM schedules WHERE id = ?').run(id);
+    if (this.userId === null) {
+      this.db.prepare('DELETE FROM schedules WHERE id = ?').run(id);
+    } else {
+      this.db.prepare('DELETE FROM schedules WHERE id = ? AND user_id = ?').run(id, this.userId);
+    }
   }
 
   markRun(id: string, runId: number, ranAt: string, nextRunAt: string): void {

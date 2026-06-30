@@ -11,7 +11,7 @@ beforeEach(() => {
 
 describe('JiraSiteRepository', () => {
   it('inserts, lists and gets a site', () => {
-    const repo = new JiraSiteRepository(db);
+    const repo = new JiraSiteRepository(db, 1);
     repo.insert({
       id: 's1',
       baseUrl: 'https://acme.atlassian.net',
@@ -25,7 +25,7 @@ describe('JiraSiteRepository', () => {
   });
 
   it('updates and deletes', () => {
-    const repo = new JiraSiteRepository(db);
+    const repo = new JiraSiteRepository(db, 1);
     repo.insert({
       id: 's1',
       baseUrl: 'https://a.net',
@@ -43,7 +43,7 @@ describe('JiraSiteRepository', () => {
 
 describe('JiraProjectRepository', () => {
   beforeEach(() => {
-    new JiraSiteRepository(db).insert({
+    new JiraSiteRepository(db, 1).insert({
       id: 'site1',
       baseUrl: 'https://a.net',
       cloudId: 'cloud-1',
@@ -70,7 +70,7 @@ describe('JiraProjectRepository', () => {
   it('cascades delete when the site is removed', () => {
     const projectRepo = new JiraProjectRepository(db);
     projectRepo.replaceForSite('site1', [{ projectKey: 'WS', projectName: 'Work' }]);
-    new JiraSiteRepository(db).delete('site1');
+    new JiraSiteRepository(db, 1).delete('site1');
     expect(projectRepo.listBySite('site1')).toHaveLength(0);
   });
 });
