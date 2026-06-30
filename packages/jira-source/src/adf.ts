@@ -5,22 +5,27 @@ export interface AdfNode {
   content?: AdfNode[];
 }
 
+const MAX_DEPTH = 100;
+
 /** Convert an Atlassian Document Format body to readable plain text. */
 export function adfToText(doc: AdfNode | null | undefined): string {
   if (!doc) return '';
   const out: string[] = [];
-  walk(doc, out);
+  walk(doc, out, 0);
   return out.join('').replace(/\n{3,}/g, '\n\n');
 }
 
-function walk(node: AdfNode, out: string[]): void {
+function walk(node: AdfNode, out: string[], depth: number): void {
+  // Guard against pathologically deep ADF trees blowing the call stack.
+  if (depth > MAX_DEPTH) return;
+  const children = (c: AdfNode): void => walk(c, out, depth + 1);
   switch (node.type) {
     case 'doc':
-      for (const c of node.content ?? []) walk(c, out);
+      for (const c of node.content ?? []) children(c);
       return;
     case 'paragraph':
     case 'heading':
-      for (const c of node.content ?? []) walk(c, out);
+      for (const c of node.content ?? []) children(c);
       out.push('\n\n');
       return;
     case 'text':
@@ -41,9 +46,9 @@ function walk(node: AdfNode, out: string[]): void {
       return;
     case 'listItem':
       out.push('- ');
-      for (const c of node.content ?? []) walk(c, out);
+      for (const c of node.content ?? []) children(c);
       return;
     default:
-      for (const c of node.content ?? []) walk(c, out);
+      for (const c of node.content ?? []) children(c);
   }
 }

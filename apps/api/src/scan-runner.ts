@@ -22,6 +22,7 @@ function buildCompositeSource(
   app: FastifyInstance,
   githubSource: GithubSource,
   since: Date,
+  lookbackDays: number,
 ): Source {
   const siteRepo = new JiraSiteRepository(app.db);
   const projectRepo = new JiraProjectRepository(app.db);
@@ -31,14 +32,23 @@ function buildCompositeSource(
     fetchPendingComments: async (opts): Promise<PendingComment[]> => {
       const github = await githubSource.fetchPendingComments(opts);
       if (sites.length === 0) return github;
-      const jira = new JiraSource({
-        sites,
-        projects: sites.flatMap((s) => projectRepo.listBySite(s.id)),
-        decryptToken: (enc, nonce) => decryptSecret(enc, nonce, app.masterKey),
-        since,
-      });
-      const jiraComments = await jira.fetchPendingComments();
-      return [...github, ...jiraComments];
+      // JIRA is best-effort: a failing site/token must not discard the GitHub
+      // results already fetched or fail the whole scan run.
+      try {
+        const jira = new JiraSource({
+          sites,
+          projects: sites.flatMap((s) => projectRepo.listBySite(s.id)),
+          decryptToken: (enc, nonce) => decryptSecret(enc, nonce, app.masterKey),
+          since,
+          lookbackDays,
+          logger: { error: (msg, err) => process.stderr.write(`${msg}: ${String(err)}\n`) },
+        });
+        const jiraComments = await jira.fetchPendingComments();
+        return [...github, ...jiraComments];
+      } catch (err) {
+        process.stderr.write(`[scan] JIRA fetch failed, using GitHub only: ${String(err)}\n`);
+        return github;
+      }
     },
   };
 }
@@ -79,7 +89,7 @@ export async function triggerScan(
         commentsRepo: createCommentsRepo(app.db),
         runsRepo: createRunsRepo(app.db, () => new Date()),
         watermarksRepo: createWatermarksRepo(app.db),
-        source: buildCompositeSource(app, githubSource, since),
+        source: buildCompositeSource(app, githubSource, since, config.scan.lookbackDays),
         notifier: new SmtpNotifier({ ...notif.smtp, from: notif.from, to: notif.to }),
         logger: pino({ level: 'info' }),
       },

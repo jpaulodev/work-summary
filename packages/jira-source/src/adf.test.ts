@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { adfToText } from './adf.js';
+import { adfToText, type AdfNode } from './adf.js';
 
 describe('adfToText', () => {
   it('handles paragraphs and text', () => {
@@ -49,5 +49,12 @@ describe('adfToText', () => {
   it('returns empty string for null/undefined', () => {
     expect(adfToText(null)).toBe('');
     expect(adfToText(undefined)).toBe('');
+  });
+
+  it('does not overflow the stack on deeply nested input', () => {
+    let node: AdfNode = { type: 'text', text: 'deep' };
+    for (let i = 0; i < 5000; i++) node = { type: 'blockquote', content: [node] };
+    const doc = { type: 'doc', content: [node] };
+    expect(() => adfToText(doc)).not.toThrow();
   });
 });

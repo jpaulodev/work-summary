@@ -10,12 +10,24 @@ const SiteSchema = z.object({
   baseUrl: z.string().url(),
   email: z.string().email(),
   token: z.string().min(8),
-  developerFieldId: z.string().nullable().optional(),
+  // Restrict to the JIRA custom-field id format so it can be safely used in JQL.
+  developerFieldId: z
+    .string()
+    .regex(/^customfield_\d+$/)
+    .nullable()
+    .optional(),
   enabled: z.boolean().default(true),
 });
 
 const ProjectSelection = z.object({
-  projects: z.array(z.object({ projectKey: z.string(), projectName: z.string() })),
+  projects: z.array(
+    z.object({
+      // JIRA project keys are uppercase alphanumerics; enforced so they cannot
+      // break out of the quoted JQL term.
+      projectKey: z.string().regex(/^[A-Z][A-Z0-9_]+$/),
+      projectName: z.string().min(1).max(200),
+    }),
+  ),
 });
 
 interface RedactedSite {
