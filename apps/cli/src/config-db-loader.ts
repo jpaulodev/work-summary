@@ -44,20 +44,25 @@ export function loadConfigFromDb(db: SqliteDatabase, key: Buffer, githubLogin: s
   const src = createSourceConfigRepo(db, key).getGithub();
   if (!src) throw new ConfigError('No source config in DB');
   const notifs = createNotifierConfigRepo(db, key);
-  const notifications = notifs.list().map((n) => {
-    const f = notifs.get(n.id);
-    if (!f) throw new ConfigError(`notifier ${n.id} missing`);
-    return {
-      id: n.id,
-      type: 'smtp' as const,
-      enabled: n.enabled,
-      smtp: { host: n.host, port: n.port, secure: n.secure, user: f.user, pass: f.pass },
-      from: n.from,
-      to: n.to,
-      subjectTemplate: n.subjectTemplate,
-    };
-  });
-  if (notifications.length === 0) throw new ConfigError('No notifier config in DB');
+  // The CLI only sends email; webhook notifiers (slack/teams) are delivered by
+  // the API scan process, so they are filtered out of the CLI config here.
+  const notifications = notifs
+    .list()
+    .filter((n) => n.type === 'smtp')
+    .map((n) => {
+      const f = notifs.get(n.id);
+      if (!f) throw new ConfigError(`notifier ${n.id} missing`);
+      return {
+        id: n.id,
+        type: 'smtp' as const,
+        enabled: n.enabled,
+        smtp: { host: n.host, port: n.port, secure: n.secure, user: f.user, pass: f.pass },
+        from: n.from,
+        to: n.to,
+        subjectTemplate: n.subjectTemplate,
+      };
+    });
+  if (notifications.length === 0) throw new ConfigError('No SMTP notifier config in DB');
   return {
     user: { githubLogin },
     sources: {

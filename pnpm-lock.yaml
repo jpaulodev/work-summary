@@ -62,6 +62,12 @@ importers:
       '@work-summary/jira-source':
         specifier: workspace:*
         version: link:../../packages/jira-source
+      '@work-summary/notifier-slack':
+        specifier: workspace:*
+        version: link:../../packages/notifier-slack
+      '@work-summary/notifier-teams':
+        specifier: workspace:*
+        version: link:../../packages/notifier-teams
       '@work-summary/notifiers':
         specifier: workspace:*
         version: link:../../packages/notifiers
@@ -290,6 +296,38 @@ importers:
       '@work-summary/storage':
         specifier: workspace:*
         version: link:../storage
+    devDependencies:
+      typescript:
+        specifier: ^5.5.4
+        version: 5.9.3
+      vitest:
+        specifier: ^2.0.5
+        version: 2.1.9(@types/node@20.19.43)(jsdom@25.0.1)(msw@2.14.6(@types/node@20.19.43)(typescript@5.9.3))
+
+  packages/notifier-slack:
+    dependencies:
+      '@work-summary/core':
+        specifier: workspace:*
+        version: link:../core
+      '@work-summary/notifiers':
+        specifier: workspace:*
+        version: link:../notifiers
+    devDependencies:
+      typescript:
+        specifier: ^5.5.4
+        version: 5.9.3
+      vitest:
+        specifier: ^2.0.5
+        version: 2.1.9(@types/node@20.19.43)(jsdom@25.0.1)(msw@2.14.6(@types/node@20.19.43)(typescript@5.9.3))
+
+  packages/notifier-teams:
+    dependencies:
+      '@work-summary/core':
+        specifier: workspace:*
+        version: link:../core
+      '@work-summary/notifiers':
+        specifier: workspace:*
+        version: link:../notifiers
     devDependencies:
       typescript:
         specifier: ^5.5.4
