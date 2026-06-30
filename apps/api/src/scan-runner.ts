@@ -99,13 +99,15 @@ export async function triggerScan(
     }
 
     // Build a notifier per enabled config (smtp/slack/teams) and fan out to all.
+    // Notifiers are OPTIONAL: with none configured the composite is a no-op, so
+    // the scan still fetches, de-dups, and records comments to the dashboard —
+    // it just doesn't send a digest.
     const notifRepo = createNotifierConfigRepo(app.db, app.masterKey, userId);
     const fulls = notifRepo
       .list()
       .filter((n) => n.enabled)
       .map((n) => notifRepo.get(n.id))
       .filter((n): n is NonNullable<typeof n> => n !== null);
-    if (fulls.length === 0) throw new Error('no enabled notifier');
     const composite = buildCompositeNotifier(
       fulls.map((f) => ({ id: f.id, notifier: buildNotifier(f) })),
       logger,
