@@ -17,6 +17,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@work-summary/auth": "workspace:*",
+    "@work-summary/config-db": "workspace:*",
     "@work-summary/core": "workspace:*",
     "@work-summary/github-source": "workspace:*",
     "@work-summary/notifiers": "workspace:*",

@@ -3,9 +3,13 @@ import { Command } from 'commander';
 import { runInit } from './commands/init.js';
 import { runDoctor } from './commands/doctor.js';
 import { runScan } from './commands/scan.js';
-import { loadConfig, ConfigError } from './config.js';
+import { loadConfig, ConfigError, type Config } from './config.js';
+import { loadMasterKey, hasDbConfig, loadConfigFromDb } from './config-db-loader.js';
+import { runImportYaml } from './commands/import-yaml.js';
+import { bootstrapMasterKey } from './config-db-loader.js';
 import { createLogger } from './logger.js';
 import { defaultConfigPath, defaultStateDir, defaultDbPath } from './paths.js';
+import type { SqliteDatabase } from '@work-summary/storage';
 import { createOctokit, GithubSource } from '@work-summary/github-source';
 import { SmtpNotifier } from '@work-summary/notifiers';
 import {
@@ -82,14 +86,14 @@ program
   .option('--debug', 'verbose debug logging', false)
   .action(async (opts: { config: string; dryRun: boolean; json: boolean; debug: boolean }) => {
     try {
-      const cfg = loadConfig(opts.config, process.env);
+      const db = openDatabase(defaultDbPath());
+      runMigrations(db);
+      const cfg = await resolveConfig(db, opts.config);
       const logger = createLogger({
         level: opts.debug ? 'debug' : cfg.logging.level,
         file: cfg.logging.file,
         jsonOnly: opts.json,
       });
-      const db = openDatabase(defaultDbPath());
-      runMigrations(db);
       const client = createOctokit({ token: cfg.sources.github.token });
       const source = new GithubSource(client);
       const notif = cfg.notifications.find((n) => n.enabled);
@@ -122,6 +126,52 @@ program
       process.exit(EXIT.UNEXPECTED);
     }
   });
+
+program
+  .command('import-yaml')
+  .description('Import an existing YAML config into the DB (requires MASTER_PASSPHRASE)')
+  .option('-c, --config <path>', 'config path', defaultConfigPath())
+  .action(async (opts: { config: string }) => {
+    try {
+      const passphrase = process.env.MASTER_PASSPHRASE;
+      if (!passphrase) {
+        process.stderr.write('MASTER_PASSPHRASE is required for import-yaml\n');
+        process.exit(EXIT.CONFIG);
+      }
+      const db = openDatabase(defaultDbPath());
+      runMigrations(db);
+      const key =
+        (await loadMasterKey(db, passphrase)) ?? (await bootstrapMasterKey(db, passphrase));
+      const res = runImportYaml({ db, key, configPath: opts.config, env: process.env });
+      process.stdout.write(
+        `OK Imported ${res.repos} repo(s) and ${res.notifiers} notifier(s)\n` +
+          `OK Renamed ${opts.config} -> ${res.renamedTo}\n`,
+      );
+      process.exit(EXIT.OK);
+    } catch (err) {
+      if (err instanceof ConfigError) {
+        process.stderr.write(`config error: ${err.message}\n`);
+        process.exit(EXIT.CONFIG);
+      }
+      process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.exit(EXIT.UNEXPECTED);
+    }
+  });
+
+/**
+ * Resolve the run config: prefer DB-backed config when MASTER_PASSPHRASE is set
+ * and the DB holds a github source; otherwise fall back to the Phase 1 YAML file.
+ */
+async function resolveConfig(db: SqliteDatabase, configPath: string): Promise<Config> {
+  const passphrase = process.env.MASTER_PASSPHRASE;
+  if (passphrase && hasDbConfig(db)) {
+    const key = await loadMasterKey(db, passphrase);
+    if (key) {
+      return loadConfigFromDb(db, key, process.env.GITHUB_LOGIN ?? '');
+    }
+  }
+  return loadConfig(configPath, process.env);
+}
 
 program.parseAsync(process.argv).catch((err: unknown) => {
   process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);

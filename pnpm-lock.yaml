@@ -93,6 +93,12 @@ importers:
 
   apps/cli:
     dependencies:
+      '@work-summary/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
+      '@work-summary/config-db':
+        specifier: workspace:*
+        version: link:../../packages/config-db
       '@work-summary/core':
         specifier: workspace:*
         version: link:../../packages/core
