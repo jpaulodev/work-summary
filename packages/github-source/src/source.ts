@@ -21,6 +21,8 @@ export interface FetchOptions {
   rules: MatchRulesConfig;
   filters: BotFilterConfig;
   concurrency: number;
+  /** Called as each repo finishes scanning, for progress reporting. */
+  onRepoDone?: (done: number, total: number) => void;
 }
 
 export interface Source {
@@ -45,8 +47,17 @@ export class GithubSource implements Source {
 
   async fetchPendingComments(opts: FetchOptions): Promise<PendingComment[]> {
     const limit = pLimit(opts.concurrency);
+    const total = opts.repos.length;
+    let done = 0;
     const perRepo = await Promise.all(
-      opts.repos.map((repo) => limit(() => this.scanRepo(repo, opts))),
+      opts.repos.map((repo) =>
+        limit(async () => {
+          const result = await this.scanRepo(repo, opts);
+          done += 1;
+          opts.onRepoDone?.(done, total);
+          return result;
+        }),
+      ),
     );
     return perRepo.flat();
   }

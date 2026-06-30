@@ -99,9 +99,17 @@ export interface RunRow {
   sourceStats: string | null;
 }
 
+export interface ScanProgress {
+  phase: 'preparing' | 'github' | 'jira' | 'saving';
+  reposDone: number;
+  reposTotal: number;
+  commentsFound: number;
+}
+
 export interface ScanStatus {
   running: boolean;
   runId?: number;
+  progress?: ScanProgress;
 }
 
 export interface Schedule {

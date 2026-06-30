@@ -30,6 +30,7 @@ function buildCompositeSource(
   jiraAccess: JiraAccess | null,
   since: Date,
   lookbackDays: number,
+  report: (patch: Partial<ScanProgress>) => void,
 ): Source {
   const siteRepo = new JiraSiteRepository(app.db, userId);
   const projectRepo = new JiraProjectRepository(app.db, userId);
@@ -38,10 +39,21 @@ function buildCompositeSource(
     id: 'github',
     fetchPendingComments: async (opts): Promise<PendingComment[]> => {
       // GitHub is skipped entirely when no OAuth connection exists.
-      const github = githubSource ? await githubSource.fetchPendingComments(opts) : [];
-      if (!jiraAccess || sites.length === 0) return github;
+      report({ phase: 'github', reposTotal: opts.repos.length, reposDone: 0 });
+      const github = githubSource
+        ? await githubSource.fetchPendingComments({
+            ...opts,
+            onRepoDone: (done, total) => report({ reposDone: done, reposTotal: total }),
+          })
+        : [];
+      report({ commentsFound: github.length });
+      if (!jiraAccess || sites.length === 0) {
+        report({ phase: 'saving' });
+        return github;
+      }
       // JIRA is best-effort: a failing site/token must not discard the GitHub
       // results already fetched or fail the whole scan run.
+      report({ phase: 'jira' });
       try {
         const jira = new JiraSource({
           sites,
@@ -53,24 +65,42 @@ function buildCompositeSource(
           logger: { error: (msg, err) => process.stderr.write(`${msg}: ${String(err)}\n`) },
         });
         const jiraComments = await jira.fetchPendingComments();
+        report({ phase: 'saving', commentsFound: github.length + jiraComments.length });
         return [...github, ...jiraComments];
       } catch (err) {
         process.stderr.write(`[scan] JIRA fetch failed, using GitHub only: ${String(err)}\n`);
+        report({ phase: 'saving' });
         return github;
       }
     },
   };
 }
 
+/** Coarse, live progress for an in-flight scan, surfaced via GET /scan/status. */
+export interface ScanProgress {
+  phase: 'preparing' | 'github' | 'jira' | 'saving';
+  reposDone: number;
+  reposTotal: number;
+  commentsFound: number;
+}
+
 // Per-user single-flight: one in-flight scan per user, last run id per user.
 const runningUsers = new Set<number>();
 const lastRunIdByUser = new Map<number, number>();
+const progressByUser = new Map<number, ScanProgress>();
 
-export function scanStatus(userId: number): { running: boolean; runId?: number } {
+export function scanStatus(userId: number): {
+  running: boolean;
+  runId?: number;
+  progress?: ScanProgress;
+} {
   const runId = lastRunIdByUser.get(userId);
-  return runId === undefined
-    ? { running: runningUsers.has(userId) }
-    : { running: runningUsers.has(userId), runId };
+  const progress = progressByUser.get(userId);
+  return {
+    running: runningUsers.has(userId),
+    ...(runId === undefined ? {} : { runId }),
+    ...(progress ? { progress } : {}),
+  };
 }
 
 export interface TriggerScanOptions {
@@ -86,6 +116,16 @@ export async function triggerScan(
   const userId = opts.userId;
   if (runningUsers.has(userId)) throw new Error('already-running');
   runningUsers.add(userId);
+  const report = (patch: Partial<ScanProgress>): void => {
+    const cur = progressByUser.get(userId) ?? {
+      phase: 'preparing',
+      reposDone: 0,
+      reposTotal: 0,
+      commentsFound: 0,
+    };
+    progressByUser.set(userId, { ...cur, ...patch });
+  };
+  report({});
   try {
     const logger = pino({ level: 'info' });
     const ghCfg = createSourceConfigRepo(app.db, userId).getGithub();
@@ -173,6 +213,7 @@ export async function triggerScan(
           jiraAccess,
           since,
           config.scan.lookbackDays,
+          report,
         ),
         notifier: composite,
         logger,
@@ -186,5 +227,6 @@ export async function triggerScan(
     return { runId: result.runId };
   } finally {
     runningUsers.delete(userId);
+    progressByUser.delete(userId);
   }
 }
