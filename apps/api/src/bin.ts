@@ -47,8 +47,11 @@ async function main(): Promise<void> {
   });
 
   const port = Number(process.env.PORT ?? 3001);
-  await app.listen({ port, host: '127.0.0.1' });
-  process.stdout.write(`work-summary API listening on http://127.0.0.1:${port}\n`);
+  // Default to localhost-only. Set HOST=0.0.0.0 to serve other machines on the
+  // network (the app requires login, so LAN exposure is the intended use there).
+  const host = process.env.HOST && process.env.HOST.length > 0 ? process.env.HOST : '127.0.0.1';
+  await app.listen({ port, host });
+  process.stdout.write(`work-summary API listening on http://${host}:${port}\n`);
 
   const hasUser = db.prepare('SELECT 1 FROM app_user WHERE id = 1').get();
   if (!hasUser) {

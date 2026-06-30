@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { randomBytes } from 'node:crypto';
 import { verifyPassword, hashPassword, signSessionId } from '@work-summary/auth';
 import { findUsableInvite } from './invites.js';
+import { cookieSecure } from '../cookies.js';
 
 const LoginSchema = z.object({ username: z.string(), password: z.string() });
 const RegisterSchema = z.object({
@@ -21,7 +22,7 @@ function startSession(app: FastifyInstance, reply: FastifyReply, userId: number)
   void reply.setCookie('ws_session', signSessionId(sid, app.sessionSecret), {
     httpOnly: true,
     sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    secure: cookieSecure(),
     expires,
     path: '/',
   });

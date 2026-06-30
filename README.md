@@ -209,18 +209,20 @@ Set these in a `.env` file at the repo root (`cp .env.example .env`) — the API
 auto-load it — or export them as real environment variables. See
 [`.env.example`](.env.example) for the annotated template.
 
-| Var                                                     | Used by   | Purpose                                                                                                         |
-| ------------------------------------------------------- | --------- | --------------------------------------------------------------------------------------------------------------- |
-| `GITHUB_TOKEN`                                          | CLI       | GitHub PAT (`repo` + `read:user`). In the dashboard the token is stored encrypted in the DB instead.            |
-| `SMTP_USER` / `SMTP_PASS`                               | CLI       | SMTP credentials referenced from the YAML config.                                                               |
-| `MASTER_PASSPHRASE`                                     | API       | Derives the AES-256-GCM master key and session secret. Required to start the API. Use the same value every run. |
-| `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET` | API       | GitHub OAuth App credentials for the "Connect GitHub" flow.                                                     |
-| `JIRA_OAUTH_CLIENT_ID` / `JIRA_OAUTH_CLIENT_SECRET`     | API       | Atlassian OAuth 2.0 (3LO) credentials for the "Connect JIRA" flow.                                              |
-| `PUBLIC_BASE_URL`                                       | API       | Base URL used to build OAuth redirect URIs (default `http://localhost:3001`).                                   |
-| `PORT`                                                  | API + web | API port (default `3001`); the Vite dev proxy targets it automatically.                                         |
-| `WEB_PORT`                                              | web       | Vite dev-server port (default `5173`).                                                                          |
-| `NODE_ENV=production`                                   | API       | Also serve the built dashboard from the API origin.                                                             |
-| `XDG_STATE_HOME`                                        | CLI + API | Override the state dir (default `~/.local/state`); both share `…/work-summary/state.db`.                        |
+| Var                                                     | Used by   | Purpose                                                                                                           |
+| ------------------------------------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------- |
+| `GITHUB_TOKEN`                                          | CLI       | GitHub PAT (`repo` + `read:user`). In the dashboard the token is stored encrypted in the DB instead.              |
+| `SMTP_USER` / `SMTP_PASS`                               | CLI       | SMTP credentials referenced from the YAML config.                                                                 |
+| `MASTER_PASSPHRASE`                                     | API       | Derives the AES-256-GCM master key and session secret. Required to start the API. Use the same value every run.   |
+| `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET` | API       | GitHub OAuth App credentials for the "Connect GitHub" flow.                                                       |
+| `JIRA_OAUTH_CLIENT_ID` / `JIRA_OAUTH_CLIENT_SECRET`     | API       | Atlassian OAuth 2.0 (3LO) credentials for the "Connect JIRA" flow.                                                |
+| `PUBLIC_BASE_URL`                                       | API       | Base URL used to build OAuth redirect URIs (default `http://localhost:3001`).                                     |
+| `PORT`                                                  | API + web | API port (default `3001`); the Vite dev proxy targets it automatically.                                           |
+| `WEB_PORT`                                              | web       | Vite dev-server port (default `5173`).                                                                            |
+| `HOST`                                                  | API       | Bind address (default `127.0.0.1`). Set `0.0.0.0` to reach the dashboard from other machines on the network.      |
+| `COOKIE_SECURE`                                         | API       | Override the session-cookie `Secure` flag (`true`/`false`). Default: secure only when `PUBLIC_BASE_URL` is https. |
+| `NODE_ENV=production`                                   | API       | Also serve the built dashboard from the API origin.                                                               |
+| `XDG_STATE_HOME`                                        | CLI + API | Override the state dir (default `~/.local/state`); both share `…/work-summary/state.db`.                          |
 
 ## Exit codes (CLI)
 
@@ -241,6 +243,11 @@ auto-load it — or export them as real environment variables. See
 - **`MASTER_PASSPHRASE env var is required to start the API`** — export it before starting
   the API, and use the _same_ passphrase each time (it derives the key that decrypts your
   stored secrets).
+- **`{"error":"unauthenticated"}` right after logging in (often when accessing from another
+  machine over http)** — the session cookie is marked `Secure` only when `PUBLIC_BASE_URL` is
+  `https`; over plain http on a LAN IP the browser drops a `Secure` cookie, so every request is
+  unauthenticated. Set `PUBLIC_BASE_URL` to the exact `http://<ip>:<port>` you browse to (not
+  https), and `HOST=0.0.0.0` so the API is reachable from other machines.
 - **"Connect GitHub" shows "OAuth is not configured"** — set `GITHUB_OAUTH_CLIENT_ID` and
   `GITHUB_OAUTH_CLIENT_SECRET` (and `PUBLIC_BASE_URL`) before starting the API, and make sure
   the OAuth App's callback URL matches `<PUBLIC_BASE_URL>/api/oauth/github/callback`.
