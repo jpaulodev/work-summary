@@ -1,0 +1,13 @@
+{
+  "name": "@work-summary/e2e",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "seed": "node seed.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.47.0"
+  }
+}
