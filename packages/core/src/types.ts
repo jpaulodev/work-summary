@@ -20,7 +20,7 @@ export interface BotFilterConfig {
 
 export interface PendingComment {
   id: string;
-  source: 'github';
+  source: 'github' | 'jira';
   repo: string;
   containerType: 'pr' | 'issue';
   containerNumber: number;
@@ -32,6 +32,8 @@ export interface PendingComment {
   body: string;
   createdAt: string;
   matchedRules: MatchRule[];
+  /** JIRA issue key (e.g. WS-12) when source is 'jira'; null/absent for GitHub. */
+  issueKey?: string | null;
 }
 
 export interface RawComment {

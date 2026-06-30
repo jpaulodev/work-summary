@@ -2,7 +2,7 @@ export type CommentStatus = 'pending' | 'addressed' | 'resolved' | 'snoozed';
 
 export interface CommentRow {
   id: string;
-  source: string;
+  source: 'github' | 'jira';
   repo: string;
   containerType: 'pr' | 'issue';
   containerNumber: number;
@@ -13,6 +13,28 @@ export interface CommentRow {
   status: CommentStatus;
   note: string | null;
   snoozedUntil: string | null;
+  issueKey: string | null;
+}
+
+export interface JiraSite {
+  id: string;
+  baseUrl: string;
+  email: string;
+  developerFieldId: string | null;
+  enabled: boolean;
+  hasToken: boolean;
+}
+
+export interface JiraProject {
+  id: number;
+  siteId: string;
+  projectKey: string;
+  projectName: string;
+}
+
+export interface JiraDiscoveredProject {
+  key: string;
+  name: string;
 }
 
 export interface CommentsPage {

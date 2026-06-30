@@ -17,6 +17,7 @@ function sample(overrides: Partial<CommentRow> = {}): CommentRow {
     status: 'pending',
     note: null,
     snoozedUntil: null,
+    issueKey: null,
     ...overrides,
   };
 }
@@ -36,6 +37,21 @@ describe('CommentCard', () => {
     render(<CommentCard comment={sample()} onStatusChange={onChange} />);
     fireEvent.click(screen.getByRole('button', { name: /addressed/i }));
     expect(onChange).toHaveBeenCalledWith('addressed');
+  });
+
+  it('renders a JIRA comment with its issue key and browse link', () => {
+    render(
+      <CommentCard
+        comment={sample({
+          source: 'jira',
+          repo: 'https://acme.atlassian.net :: WS',
+          issueKey: 'WS-12',
+        })}
+        onStatusChange={() => undefined}
+      />,
+    );
+    const link = screen.getByText('WS-12').closest('a');
+    expect(link).toHaveAttribute('href', 'https://acme.atlassian.net/browse/WS-12');
   });
 
   it('shows a reopen action for non-pending comments', () => {

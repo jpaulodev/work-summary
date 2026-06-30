@@ -14,8 +14,14 @@ import commentsRoutes from './routes/comments.js';
 import runsRoutes from './routes/runs.js';
 import scanRoutes from './routes/scan.js';
 import schedulesRoutes from './routes/schedules.js';
+import jiraRoutes from './routes/jira.js';
 import { triggerScan } from './scan-runner.js';
-import { ScheduleRepository, type SqliteDatabase } from '@work-summary/storage';
+import {
+  ScheduleRepository,
+  JiraSiteRepository,
+  JiraProjectRepository,
+  type SqliteDatabase,
+} from '@work-summary/storage';
 import { ScheduleEngine } from '@work-summary/scheduler';
 
 export interface ServerDeps {
@@ -33,6 +39,8 @@ declare module 'fastify' {
     now: () => Date;
     scheduleRepo: ScheduleRepository;
     scheduleEngine: ScheduleEngine;
+    jiraSiteRepo: JiraSiteRepository;
+    jiraProjectRepo: JiraProjectRepository;
   }
 }
 
@@ -64,6 +72,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   });
   app.decorate('scheduleRepo', scheduleRepo);
   app.decorate('scheduleEngine', scheduleEngine);
+  app.decorate('jiraSiteRepo', new JiraSiteRepository(deps.db));
+  app.decorate('jiraProjectRepo', new JiraProjectRepository(deps.db));
   scheduleEngine.start();
   app.addHook('onClose', (_instance, hookDone) => {
     scheduleEngine.stop();
@@ -81,6 +91,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   await app.register(runsRoutes, { prefix: '/api' });
   await app.register(scanRoutes, { prefix: '/api' });
   await app.register(schedulesRoutes, { prefix: '/api' });
+  await app.register(jiraRoutes, { prefix: '/api' });
 
   if (process.env.NODE_ENV === 'production') {
     const webDist = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'web', 'dist');
