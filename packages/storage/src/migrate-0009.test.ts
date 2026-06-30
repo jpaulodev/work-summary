@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDatabase } from './db.js';
+import { runMigrations } from './migrate.js';
 import type { SqliteDatabase } from './db.js';
 
 const MIGRATIONS = join(dirname(fileURLToPath(import.meta.url)), '..', 'migrations');
@@ -113,6 +114,40 @@ describe('migration 0009 (multi-user) data preservation', () => {
     expect(db.prepare('SELECT COUNT(*) AS n FROM jira_project').get()).toEqual({ n: 0 });
     expect(db.prepare('SELECT COUNT(*) AS n FROM comment_reply').get()).toEqual({ n: 1 });
     expect(db.prepare('SELECT comment_id FROM comment_reply').get()).toEqual({ comment_id: 'c1' });
+  });
+
+  it('applies via the real runMigrations path even with orphaned rows (FK off)', () => {
+    // Faithfully reproduce a production upgrade: seed the pre-0009 schema, mark
+    // 1..8 as already applied, dirty the DB with orphans (FK off, as the sqlite3
+    // CLI does), then run the REAL migrator (0009 in a single transaction).
+    const db = openDatabase(':memory:');
+    db.exec('CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)');
+    for (const f of PRE_0009) {
+      db.exec(readFileSync(join(MIGRATIONS, f), 'utf8'));
+      db.prepare('INSERT INTO schema_version VALUES (?, ?)').run(parseInt(f.slice(0, 4), 10), 'x');
+    }
+    db.prepare(
+      "INSERT INTO app_user (id, username, password_hash, created_at) VALUES (1,'me','h','')",
+    ).run();
+    db.pragma('foreign_keys = OFF');
+    db.prepare(
+      "INSERT INTO jira_project (site_id, project_key, project_name) VALUES ('ghost','G','G')",
+    ).run();
+    db.prepare(
+      "INSERT INTO comment_reply (comment_id, body, sent_at, source) VALUES ('ghost','b','t','github')",
+    ).run();
+    db.pragma('foreign_keys = ON');
+
+    expect(() => runMigrations(db)).not.toThrow();
+    expect(db.pragma('foreign_keys', { simple: true })).toBe(1); // restored
+    expect(db.pragma('foreign_key_check')).toEqual([]); // orphans dropped, DB clean
+    expect(
+      (
+        db.prepare('SELECT version FROM schema_version ORDER BY version').all() as {
+          version: number;
+        }[]
+      ).map((r) => r.version),
+    ).toContain(9);
   });
 
   it('lets two users share a jira cloud id (composite PK)', () => {

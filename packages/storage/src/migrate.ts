@@ -49,17 +49,45 @@ export function runMigrations(db: SqliteDatabase): { applied: number[] } {
   const already = appliedVersions(db);
   const all = loadMigrations();
   const applied: number[] = [];
-  for (const m of all) {
-    if (already.has(m.version)) continue;
-    const tx = db.transaction(() => {
-      db.exec(m.sql);
-      db.prepare('INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (?, ?)').run(
-        m.version,
-        new Date().toISOString(),
-      );
-    });
-    tx();
-    applied.push(m.version);
+
+  // Migrations do schema surgery (table rebuilds for composite keys, etc.).
+  // SQLite's own guidance is to disable foreign keys during such changes:
+  // otherwise an intermediate rebuild state — or a single pre-existing orphaned
+  // row left behind by an earlier FK-off delete — aborts the whole migration and
+  // it can never record its version, so the app crash-loops on every start.
+  // foreign_keys cannot be toggled inside a transaction, so we flip it here
+  // (outside any transaction) and restore the prior setting afterwards.
+  const fkWasOn = db.pragma('foreign_keys', { simple: true }) === 1;
+  if (fkWasOn) db.pragma('foreign_keys = OFF');
+  try {
+    for (const m of all) {
+      if (already.has(m.version)) continue;
+      try {
+        const tx = db.transaction(() => {
+          db.exec(m.sql);
+          db.prepare(
+            'INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (?, ?)',
+          ).run(m.version, new Date().toISOString());
+        });
+        tx();
+      } catch (err) {
+        // Surface which migration failed and any FK violations, so a failure is
+        // diagnosable from the logs instead of a bare "constraint failed".
+        const violations = db.pragma('foreign_key_check') as unknown[];
+        const detail =
+          Array.isArray(violations) && violations.length > 0
+            ? ` foreign_key_check=${JSON.stringify(violations)}`
+            : '';
+        throw new Error(
+          `migration ${m.version} (${m.name}) failed: ${
+            err instanceof Error ? err.message : String(err)
+          }.${detail}`,
+        );
+      }
+      applied.push(m.version);
+    }
+  } finally {
+    if (fkWasOn) db.pragma('foreign_keys = ON');
   }
   return { applied };
 }
